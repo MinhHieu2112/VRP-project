@@ -1,0 +1,15 @@
+# --- Phân tích dữ liệu & Tính toán ma trận ---
+pandas>=2.0.0
+numpy>=1.24.0
+
+# --- Giải toán tối ưu hóa (Solvers) ---
+ortools>=9.7.0
+scipy>=1.10.0
+
+# --- Bản đồ & Hiển thị lộ trình ---
+folium>=0.14.0
+polyline>=2.0.0
+requests>=2.31.0
+
+# --- Tiện ích hệ thống ---
+typing-extensions>=4.5.0
