@@ -1,0 +1,29 @@
+{
+    "paths": {
+        "distance_matrix": "../Data/orsm_matrix.csv",
+        "locations": "../Data/locations.csv",
+        "output_dir": "results"
+    },
+
+    "model_parameters": {
+        "scaling_factor": 100,
+        "depot_id": 0
+    },
+
+    "constraints": {
+        "max_vehicles": 200,
+        "vehicle_capacity": 10,
+        "default_demand": 1
+    },
+
+    "solver_parameters": {
+        "time_limit": 300,
+        "algorithm": "GLS",
+        "first_solution_strategy": "PARALLEL_CHEAPEST_INSERTION"
+    },
+
+    "visualization": {
+        "osrm_url": "http://localhost:5001",
+        "map_filename": "route_map.html"
+    }
+}
