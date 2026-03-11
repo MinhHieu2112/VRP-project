@@ -1,0 +1,19 @@
+{
+    "paths": {
+        "distance_matrix": "../Data/orsm_matrix.csv",
+        "output_dir": "results",
+        "result_file": "pyvrp_result.txt"
+    },
+    "model_parameters": {
+        "scaling_factor": 100,
+        "num_points": 1600
+    },
+    "constraints": {
+        "max_vehicles": 200,
+        "vehicle_capacity": 10
+    },
+    "solver_parameters": {
+        "time_limit_seconds": 180,
+        "display_log": true
+    }
+}

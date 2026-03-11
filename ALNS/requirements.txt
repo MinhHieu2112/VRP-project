@@ -1,0 +1,13 @@
+# --- Thư viện xử lý dữ liệu nền tảng ---
+numpy>=1.24.0
+pandas>=2.0.0
+
+# --- Thư viện thuật toán cốt lõi ---
+alns>=0.5.0          # Framework cho Adaptive Large Neighborhood Search
+pyvrp>=0.8.2         # State-of-the-art Hybrid Genetic Search solver
+ortools>=9.7.0       # Google Optimization Tools (dùng làm baseline)
+
+# --- Thư viện hỗ trợ vẽ bản đồ và biểu đồ (Dành cho báo cáo NCKH) ---
+matplotlib>=3.7.0    # Vẽ biểu đồ hội tụ của thuật toán
+folium>=0.14.0       # Trực quan hóa lộ trình trên bản đồ thực tế TP.HCM
+scipy>=1.10.0        # Hỗ trợ các tính toán khoa học bổ trợ
