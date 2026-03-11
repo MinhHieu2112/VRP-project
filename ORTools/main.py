@@ -3,7 +3,7 @@ import os
 import time
 from Utils.data_loader import DataLoader
 from Utils.visualizer import Visualizer
-from solver_OR_Tools import ORToolsSolver
+from solver.solver_OR_Tools import ORToolsSolver
 
 def load_config(path='config.json'):
     with open(path, 'r', encoding='utf-8') as f:
