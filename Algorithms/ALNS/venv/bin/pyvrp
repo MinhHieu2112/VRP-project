@@ -1,0 +1,6 @@
+#!/Users/nguyenvominhhieu/Downloads/Project-VRP/Algorithms/ALNS/venv/bin/python
+import sys
+from pyvrp.cli import main
+if __name__ == '__main__':
+    sys.argv[0] = sys.argv[0].removesuffix('.exe')
+    sys.exit(main())
