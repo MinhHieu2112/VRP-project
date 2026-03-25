@@ -1,7 +1,7 @@
 --- BÁO CÁO KẾT QUẢ ACVRP ---
 Tổng quãng đường: 698.63 km
 Số xe thực tế sử dụng: 161
-Thời gian tính toán: 183.40 giây
+Thời gian tính toán: 183.12 giây
 
 Chi tiết các tuyến đường:
 Route #1: 1287 542 484 1461 669 198 454 1345 816 1324

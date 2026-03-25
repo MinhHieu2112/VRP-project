@@ -17,11 +17,11 @@ class DataLoader:
         Đọc dữ liệu dựa trên các tham số cấu hình trong JSON.
         """
         # 1. Lấy các tham số ràng buộc từ JSON
-        constraints = self.config.get('constraints', {})
+        constraints = self.config.get('global_constraints', {})
         num_vehicles = constraints.get('max_vehicles', 200)
         vehicle_capacity = constraints.get('vehicle_capacity', 10)
         default_demand = constraints.get('default_demand', 1)
-        scaling_factor = self.config.get('scaling_factor', 100)
+        scaling_factor = self.config.get('common_model_parameters', {}).get('scaling_factor', 100)
 
         # 2. Đọc ma trận khoảng cách
         if not os.path.exists(self.matrix_path):
@@ -44,7 +44,7 @@ class DataLoader:
         if 'demand' not in df_locs.columns:
             # Nếu file CSV không có cột demand, dùng default_demand từ JSON
             # Depot (ID 0) luôn có demand = 0
-            demands = np.ones(len(df_locs)) * default_demand
+            demands = np.full(len(df_locs), default_demand, dtype=np.int64)
             demands[0] = 0 
         else:
             demands = df_locs['demand'].values

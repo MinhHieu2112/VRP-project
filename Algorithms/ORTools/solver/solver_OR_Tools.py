@@ -5,9 +5,8 @@ class ORToolsSolver:
     def __init__(self, data, config):
         self.data = data
         self.config = config
-        
-        # 1. Lấy thông số từ model_parameters
-        model_params = config.get("model_parameters", {})
+        # 1. Lấy thông số từ common_model_parameters
+        model_params = config.get("common_model_parameters", {})
         self.scaling_factor = model_params.get("scaling_factor", 100)
         self.depot_id = model_params.get("depot_id", 0)
 
@@ -31,41 +30,6 @@ class ORToolsSolver:
     def _demand_callback(self, from_idx):
         """Trả về nhu cầu tải trọng tại node."""
         return self.data["demands"][self.manager.IndexToNode(from_idx)]
-
-    def solve(self):
-        solver_cfg = self.config.get("solver_parameters", {})
-        
-        # 1. Đăng ký các hàm Callback
-        transit_callback_index = self.routing.RegisterTransitCallback(self._distance_callback)
-        self.routing.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
-        
-        demand_callback_index = self.routing.RegisterUnaryTransitCallback(self._demand_callback)
-        capacities = [self.config["constraints"]["vehicle_capacity"]] * self.data["num_vehicles"]
-        self.routing.AddDimensionWithVehicleCapacity(
-            demand_callback_index, 0, capacities, True, "Capacity"
-        )
-
-        # 2. Cấu hình tham số tìm kiếm từ Config
-        params = pywrapcp.DefaultRoutingSearchParameters()
-        
-        # Ánh xạ First Solution Strategy
-        fs_str = solver_cfg.get("first_solution_strategy", "PATH_CHEAPEST_ARC")
-        params.first_solution_strategy = getattr(routing_enums_pb2.FirstSolutionStrategy, fs_str)
-        
-        # Ánh xạ Metaheuristic (Xử lý khoảng trắng nếu có)
-        algo_str = solver_cfg.get("algorithm", "GUIDED_LOCAL_SEARCH").replace(" ", "_")
-        params.local_search_metaheuristic = getattr(routing_enums_pb2.LocalSearchMetaheuristic, algo_str)
-        
-        params.time_limit.seconds = solver_cfg.get("time_limit", 180)
-        params.log_search = True 
-
-        # 3. Giải bài toán
-        print(f"--- Đang tìm kiếm với: {fs_str} + {algo_str} ---")
-        solution = self.routing.SolveWithParameters(params)
-
-        if solution:
-            return self._extract(solution)
-        return None, 0
 
     def _extract(self, solution):
         routes = {}
@@ -100,3 +64,38 @@ class ORToolsSolver:
             routes[vehicle_count] = route_nodes
 
         return routes, total_distance / self.scaling_factor
+
+    def solve(self):
+        solver_cfg = self.config.get("solvers", {}).get("or_tools", {})
+        
+        # 1. Đăng ký các hàm Callback
+        transit_callback_index = self.routing.RegisterTransitCallback(self._distance_callback)
+        self.routing.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
+        
+        demand_callback_index = self.routing.RegisterUnaryTransitCallback(self._demand_callback)
+        capacities = [self.config["global_constraints"]["vehicle_capacity"]] * self.data["num_vehicles"]
+        self.routing.AddDimensionWithVehicleCapacity(
+            demand_callback_index, 0, capacities, True, "Capacity"
+        )
+
+        # 2. Cấu hình tham số tìm kiếm từ Config
+        params = pywrapcp.DefaultRoutingSearchParameters()
+        
+        # Ánh xạ First Solution Strategy
+        fs_str = solver_cfg.get("first_solution_strategy", "PATH_CHEAPEST_ARC")
+        params.first_solution_strategy = getattr(routing_enums_pb2.FirstSolutionStrategy, fs_str)
+        
+        # Ánh xạ Metaheuristic (Xử lý khoảng trắng nếu có)
+        algo_str = solver_cfg.get("algorithm", "GUIDED_LOCAL_SEARCH").replace(" ", "_")
+        params.local_search_metaheuristic = getattr(routing_enums_pb2.LocalSearchMetaheuristic, algo_str)
+        
+        params.time_limit.seconds = solver_cfg.get("time_limit", 180)
+        params.log_search = True 
+
+        # 3. Giải bài toán
+        print(f"--- Đang tìm kiếm với: {fs_str} + {algo_str} ---")
+        solution = self.routing.SolveWithParameters(params)
+
+        if solution:
+            return self._extract(solution)
+        return None, 0

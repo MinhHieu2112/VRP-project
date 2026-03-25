@@ -1,100 +1,45 @@
-import time
-from ortools.constraint_solver import routing_enums_pb2, pywrapcp
+from pyvrp import Model
+from pyvrp.stop import MaxRuntime
 
-class ORToolsSolver:
-    def __init__(self, data, config):
-        self.data = data
-        self.config = config
+class PyVRPSolver:
+    def __init__(self, matrix, constraints):
+        self.matrix = matrix
+        self.constraints = constraints
+        self.model = Model()
+
+    def solve(self, time_limit=180, display=True):
+        num_points = self.matrix.shape[0]
+        nodes = []
+
+        print(f"--- Khởi tạo Model PyVRP cho {num_points} điểm ---")
         
-        model_params = config.get("model_parameters", {})
-        self.scaling_factor = model_params.get("scaling_factor", 100)
-        self.depot_id = model_params.get("depot_id", 0)
+        # 1. Thêm Kho (Depot)
+        depot = self.model.add_depot(x=0, y=0)
+        nodes.append(depot)
 
-        self.manager = pywrapcp.RoutingIndexManager(
-            len(data["distance_matrix"]), 
-            data["num_vehicles"], 
-            self.depot_id
-        )
-        self.routing = pywrapcp.RoutingModel(self.manager)
+        # 2. Thêm Khách hàng (Clients)
+        # Sử dụng default_demand từ JSON nếu có, mặc định là 1
+        demand = self.constraints.get('default_demand', 1)
+        for _ in range(1, num_points):
+            client = self.model.add_client(x=0, y=0, delivery=demand)
+            nodes.append(client)
 
-    def _distance_callback(self, from_idx, to_idx):
-        from_node = self.manager.IndexToNode(from_idx)
-        to_node = self.manager.IndexToNode(to_idx)
-        actual_dist = self.data["distance_matrix"][from_node][to_node]
-        return int(round(actual_dist * self.scaling_factor))
-
-    def _demand_callback(self, from_idx):
-        return self.data["demands"][self.manager.IndexToNode(from_idx)]
-
-    def solve(self):
-        solver_cfg = self.config.get("solver_parameters", {})
-        
-        # Đăng ký callback và thiết lập chi phí
-        transit_callback_index = self.routing.RegisterTransitCallback(self._distance_callback)
-        self.routing.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
-        
-        # Thêm ràng buộc tải trọng
-        demand_callback_index = self.routing.RegisterUnaryTransitCallback(self._demand_callback)
-        capacities = [self.config["constraints"]["vehicle_capacity"]] * self.data["num_vehicles"]
-        self.routing.AddDimensionWithVehicleCapacity(
-            demand_callback_index, 0, capacities, True, "Capacity"
+        # 3. Thêm Đội xe (Lấy từ constraints đã parse từ JSON)
+        self.model.add_vehicle_type(
+            num_available=self.constraints.get('max_vehicles', 200), 
+            capacity=self.constraints.get('vehicle_capacity', 10)
         )
 
-        params = pywrapcp.DefaultRoutingSearchParameters()
-        fs_str = solver_cfg.get("first_solution_strategy", "PATH_CHEAPEST_ARC")
-        params.first_solution_strategy = getattr(routing_enums_pb2.FirstSolutionStrategy, fs_str)
+        # 4. Nạp Ma trận cạnh (2.56 triệu cạnh)
+        # ACVRP: d(i,j) != d(j,i) được đảm bảo vì ta lấy chính xác matrix[i, j]
+        print("--- Đang thiết lập ma trận cạnh ---")
+        for i in range(num_points):
+            for j in range(num_points):
+                if i != j:
+                    self.model.add_edge(nodes[i], nodes[j], distance=self.matrix[i, j])
+
+        # 5. Thực hiện giải
+        print(f"--- Bắt đầu tối ưu hóa (Limit: {time_limit}s) ---")
+        res = self.model.solve(stop=MaxRuntime(time_limit), display=display)
         
-        algo_str = solver_cfg.get("algorithm", "GUIDED_LOCAL_SEARCH").replace(" ", "_")
-        params.local_search_metaheuristic = getattr(routing_enums_pb2.LocalSearchMetaheuristic, algo_str)
-        
-        params.time_limit.seconds = solver_cfg.get("time_limit", 180)
-        params.log_search = True 
-
-        solution = self.routing.SolveWithParameters(params)
-
-        if solution:
-            return self._extract(solution)
-        return None, 0
-
-    def _extract(self, solution):
-        """
-        Trích xuất lộ trình và tính toán 'True Distance' từ ma trận gốc.
-        Giải quyết vấn đề chênh lệch do ArcCost và thiếu chặng Depot cuối.
-        """
-        routes = {}
-        true_total_distance = 0.0
-        active_vehicles_count = 0
-        
-        # Truy xuất trực tiếp ma trận khoảng cách thực (km)
-        dist_matrix = self.data["distance_matrix"]
-
-        for v_id in range(self.data["num_vehicles"]):
-            index = self.routing.Start(v_id)
-            
-            # Kiểm tra nếu xe không hoạt động (đi từ Depot thẳng đến Depot)
-            if self.routing.IsEnd(solution.Value(self.routing.NextVar(index))):
-                continue
-            
-            active_vehicles_count += 1
-            route_nodes = []
-            
-            while True:
-                node_index = self.manager.IndexToNode(index)
-                route_nodes.append(node_index)
-                
-                if self.routing.IsEnd(index):
-                    break
-                
-                # Tính toán khoảng cách thực tế giữa node hiện tại và node kế tiếp
-                prev_node = node_index
-                next_index = solution.Value(self.routing.NextVar(index))
-                next_node = self.manager.IndexToNode(next_index)
-                
-                # Cộng dồn từ ma trận gốc (km), không dùng GetArcCost
-                true_total_distance += dist_matrix[prev_node][next_node]
-                index = next_index
-
-            # Lưu lộ trình (đã bao gồm Depot đầu 0 và Depot cuối 0)
-            routes[active_vehicles_count] = route_nodes
-
-        return routes, true_total_distance
+        return res

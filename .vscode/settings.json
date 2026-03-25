@@ -1,5 +1,5 @@
 {
-    "python-envs.defaultEnvManager": "ms-python.python:system",
+    "python-envs.defaultEnvManager": "ms-python.python:venv",
     "git.ignoreLimitWarning": true,
     "java.compile.nullAnalysis.mode": "disabled"
 }
