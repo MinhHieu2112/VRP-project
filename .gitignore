@@ -10,3 +10,6 @@ Algorithms/ALNS/alns/accept/__pycache__
 Algorithms/ALNS/alns/select/__pycache__
 Algorithms/ALNS/alns/stop/__pycache__
 venv/
+.claude/
+.vscode/
+Algorithms/ACO/__pycache__
