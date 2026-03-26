@@ -96,7 +96,11 @@ def main():
             df_locations = pd.read_csv(loc_path)
             
             # Khởi tạo Visualizer
-            vis = Visualizer(df_locations, osrm_url=vis_config.get('osrm_url', "http://localhost:5001"))
+            vis = Visualizer(
+                df_locations,
+                osrm_url=vis_config.get('osrm_url', "http://localhost:5001"),
+                use_osrm=vis_config.get('use_osrm', True)
+            )
             
             # BƯỚC MỚI: Đọc route từ file TXT thay vì dùng biến trực tiếp
             routes_from_file = vis.load_routes_from_txt(result_txt_path)

@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C \"d:\\\\Hoc\\\\NCKH\\\\VRP-project\" status)"
+    ]
+  }
+}

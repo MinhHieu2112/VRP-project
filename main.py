@@ -35,7 +35,7 @@ def run_experiment(solver_type):
         
         # Lấy thông số solver từ config
         solver_cfg = config['solvers'].get(solver_type, {})
-        time_limit = solver_cfg.get('time_limit_seconds', 180)
+        time_limit = solver_cfg.get('time_limit_seconds', 300)
         
         # 2. Khởi tạo và chạy bộ giải
         start_time = time.time()
@@ -89,12 +89,17 @@ def run_experiment(solver_type):
 
         # B. Vẽ bản đồ (Visualizer dùng chung df_locations nạp từ loader)
         print(f"--- Đang trực quan hóa lộ trình ---")
-        viz = Visualizer(
-            data_bundle['df_locations'], 
-            osrm_url=config['visualization']['osrm_url']
-        )
-        map_path = os.path.join(solver_output_dir, config['visualization']['map_filename'])
-        viz.draw(standardized_result['routes'], map_path)
+        try:
+            viz = Visualizer(
+                data_bundle['df_locations'], 
+                osrm_url=config['visualization'].get('osrm_url', "http://localhost:5001"),
+                use_osrm=config['visualization'].get('use_osrm', True)
+            )
+            map_path = os.path.join(solver_output_dir, config['visualization']['map_filename'])
+            viz.draw(standardized_result['routes'], map_path)
+            print(f"[HOÀN TẤT] Map lưu tại: {map_path}")
+        except Exception as e:
+            print(f"[WARNING] Trực quan hóa thất bại: {e}")
 
         print(f"\n[HOÀN TẤT] Kết quả {solver_type} lưu tại: {solver_output_dir}")
 

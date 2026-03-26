@@ -23,6 +23,7 @@
     },
     "visualization": {
         "osrm_url": "http://localhost:5001",
+        "use_osrm": true,
         "map_filename": "route_map.html",
         "zoom_start": 13
     },

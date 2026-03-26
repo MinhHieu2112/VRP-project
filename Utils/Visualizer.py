@@ -4,18 +4,39 @@ import requests
 import polyline
 
 class Visualizer:
-    def __init__(self, df_locations, osrm_url="http://localhost:5001"):
+    def __init__(self, df_locations, osrm_url="http://localhost:5001", use_osrm=True):
         self.df = df_locations.set_index('id')
         self.osrm_url = osrm_url
         self.depot_coords = (self.df.loc[0, 'lat'], self.df.loc[0, 'lon'])
+        self.use_osrm = use_osrm and self._check_osrm_health()
+
+    def _check_osrm_health(self):
+        if not self.osrm_url:
+            print("[VISUALIZER] OSRM URL empty, dùng line thẳng.")
+            return False
+
+        test_url = f"{self.osrm_url}/route/v1/driving/{self.depot_coords[1]},{self.depot_coords[0]};{self.depot_coords[1]},{self.depot_coords[0]}?overview=false"
+        try:
+            r = requests.get(test_url, timeout=2)
+            if r.status_code == 200 and 'routes' in r.json():
+                return True
+        except Exception as e:
+            print(f"[VISUALIZER] OSRM health check failed ({e}), fallback to straight lines.")
+        return False
 
     def _get_route(self, p1, p2):
+        if not self.use_osrm:
+            return [p1, p2]
+
         url = f"{self.osrm_url}/route/v1/driving/{p1[1]},{p1[0]};{p2[1]},{p2[0]}?overview=full&geometries=polyline"
         try:
-            r = requests.get(url, timeout=1).json()
-            return polyline.decode(r['routes'][0]['geometry'])
-        except:
-            return [p1, p2]
+            r = requests.get(url, timeout=2)
+            data = r.json()
+            if r.status_code == 200 and data.get('routes'):
+                return polyline.decode(data['routes'][0]['geometry'])
+        except Exception as e:
+            print(f"[VISUALIZER] OSRM route request failed ({e}); dùng line thẳng.")
+        return [p1, p2]
 
     def draw(self, routes_dict, output_path):
         m = folium.Map(location=self.depot_coords, zoom_start=13)
