@@ -1,6 +1,6 @@
 {
     "num_vehicles": 200,
     "vehicle_capacity": 10,
-    "max_runtime_seconds": 300,
+    "max_runtime_seconds": 180,
     "demands": 1
 }
