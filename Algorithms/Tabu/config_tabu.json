@@ -1,7 +1,6 @@
 {
     "data_path": "../../Data/orsm_matrix.csv",
     "locations_path": "../../Data/locations.csv",
-    "output_dir": "result",
     "tabu_parameters": {
         "tabu_size": 30,
         "max_iterations": 5000,

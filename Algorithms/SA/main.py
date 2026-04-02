@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import time
 import pandas as pd
@@ -6,10 +7,13 @@ import pandas as pd
 from solver_sa import SimulatedAnnealingSolver
 
 # ===== XÁC ĐỊNH CÁC ĐƯỜNG DẪN GỐC =====
-# File này đang nằm ở: VRP-project/Algorithms/SA/main.py
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__)) # Thư mục SA
-# Nhảy lên 2 cấp để ra VRP-project
-PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_DIR)) 
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_DIR))
+
+# Import Utils chung từ project root
+sys.path.append(PROJECT_ROOT)
+from Utils.ResultHandler import ResultHandler
+from Utils.Visualizer import Visualizer
 
 CONFIG_PATH = os.path.join(CURRENT_DIR, "configSA.json")
 
@@ -17,16 +21,11 @@ CONFIG_PATH = os.path.join(CURRENT_DIR, "configSA.json")
 def load_config():
     if not os.path.exists(CONFIG_PATH):
         raise FileNotFoundError(f"Không tìm thấy file config tại: {CONFIG_PATH}")
-
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
 
 # ===== LOAD DATA =====
 def load_data(config):
-    # Sử dụng project_root làm mốc để tìm thư mục Data
-    # Nếu config['data_path'] là "../../Data/osrm_matrix.csv" 
-    # thì os.path.join(CURRENT_DIR, ...) sẽ tự xử lý các dấu ".." chính xác.
-    
     matrix_path = os.path.normpath(os.path.join(CURRENT_DIR, config['data_path']))
     locations_path = os.path.normpath(os.path.join(CURRENT_DIR, config['locations_path']))
 
@@ -37,17 +36,15 @@ def load_data(config):
     print("--------------------------")
 
     if not os.path.exists(matrix_path):
-        # Nếu vẫn lỗi, thử tìm phương án dự phòng trực tiếp từ Project Root
         matrix_path = os.path.join(PROJECT_ROOT, "Data", "osrm_matrix.csv")
         if not os.path.exists(matrix_path):
-            raise FileNotFoundError(f"LỖI: Không tìm thấy file matrix tại bất kỳ đâu!\nĐã thử: {matrix_path}")
+            raise FileNotFoundError(f"LỖI: Không tìm thấy file matrix!")
 
     if not os.path.exists(locations_path):
         locations_path = os.path.join(PROJECT_ROOT, "Data", "locations.csv")
         if not os.path.exists(locations_path):
             raise FileNotFoundError(f"LỖI: Không tìm thấy file locations!")
 
-    # Đọc dữ liệu
     dist = pd.read_csv(matrix_path, header=None).values
     df_locations = pd.read_csv(locations_path)
 
@@ -72,45 +69,56 @@ def run_sa():
     routes, total_cost = solver.solve()
     runtime = time.time() - start
 
-    # Kiểm tra key trong config để tránh lỗi KeyError
+    # Kiểm tra scaling factor
     common_params = config.get('common_model_parameters', {})
     scaling = common_params.get('scaling_factor', 1.0)
 
-    result = {
-        "solver_name": "Simulated Annealing",
+    # === TẠO KẾT QUẢ CHUẨN ===
+    # Lọc chỉ giữ route có khách hàng, đánh lại index từ 0
+    clean_routes = {}
+    idx = 0
+    for k, route in routes.items():
+        if len(route) > 2:
+            clean_routes[idx] = route
+            idx += 1
+
+    standardized_result = {
+        "solver_name": "SA",
         "total_distance_km": total_cost / scaling,
         "execution_time": runtime,
-        "routes": routes,
-        "num_vehicles": len(routes)
+        "routes": clean_routes,
+        "num_vehicles": len(clean_routes)
     }
 
-    # ===== PRINT =====
+    # ===== IN KẾT QUẢ =====
     print("\n===== RESULT =====")
-    print(f"Số xe: {result['num_vehicles']}")
-    print(f"Tổng quãng đường: {result['total_distance_km']:.2f} km")
-    print(f"Thời gian chạy: {result['execution_time']:.2f} s")
+    print(f"Số xe: {standardized_result['num_vehicles']}")
+    print(f"Tổng quãng đường: {standardized_result['total_distance_km']:.2f} km")
+    print(f"Thời gian chạy: {standardized_result['execution_time']:.2f} s")
 
-    # ===== SAVE RESULT =====
-    # Lưu vào thư mục Results nằm cùng cấp với main.py
-    out_dir = os.path.join(CURRENT_DIR, "Results")
-    if not os.path.exists(out_dir):
-        os.makedirs(out_dir)
+    # ===== LƯU KẾT QUẢ BẰNG RESULTHANDLER CHUNG =====
+    output_dir = os.path.join(PROJECT_ROOT, "Results", "SA")
+    os.makedirs(output_dir, exist_ok=True)
 
-    res_path = os.path.join(out_dir, "sa_result.txt")
+    ResultHandler.save_to_txt(standardized_result, output_dir)
+    ResultHandler.save_to_json(standardized_result, output_dir)
 
-    with open(res_path, "w", encoding="utf-8") as f:
-        f.write(f"Tổng quãng đường thực tế: {result['total_distance_km']:.2f} km\n")
-        f.write(f"Số xe sử dụng: {result['num_vehicles']}\n")
-        f.write(f"Giá trị Objective cuối cùng: {total_cost:.2f}\n")
-        f.write(f"Tổng thời gian chạy: {runtime:.2f} giây\n")
-        f.write("-" * 40 + "\n")
+    # ===== TRỰC QUAN HÓA BẰNG VISUALIZER CHUNG =====
+    print("--- Đang khởi tạo bản đồ trực quan ---")
+    try:
+        vis_config = config.get('visualization', {})
+        vis = Visualizer(
+            df_locations,
+            osrm_url=vis_config.get('osrm_url', "http://localhost:5001"),
+            use_osrm=vis_config.get('use_osrm', True)
+        )
+        map_path = os.path.join(output_dir, vis_config.get('map_filename', "route_map.html"))
+        vis.draw(standardized_result['routes'], map_path)
+        print(f"[HOÀN TẤT] Bản đồ lưu tại: {map_path}")
+    except Exception as e:
+        print(f"[WARNING] Trực quan hóa thất bại: {e}")
 
-        for idx, (k, route) in enumerate(routes.items()):
-            if len(route) > 2:
-                f.write(f"Route #{idx+1} (Xe {k}): {' '.join(map(str, route))}\n")
-
-    print(f"\nKết quả đã ghi vào file: {res_path}")
-    return result
+    return standardized_result
 
 if __name__ == "__main__":
     run_sa()
