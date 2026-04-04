@@ -19,7 +19,7 @@ def random_removal(state, random_state):
     if not all_clients:
         return destroyed
 
-    # Chọn ngẫu nhiên n khách hàng để xóa
+    nodes_to_remove = min(nodes_to_remove, len(all_clients))
     to_remove = random_state.choice(all_clients, nodes_to_remove, replace=False)
     
     for node in to_remove:
@@ -47,16 +47,34 @@ def worst_removal(state, random_state):
                     state.distance_matrix[prev, next_node])
             costs.append((cost, node, route_idx))
     
-    # Sắp xếp giảm dần theo chi phí
-    costs.sort(key=lambda x: x[0], reverse=True)
-    
-    for i in range(min(nodes_to_remove, len(costs))):
-        _, node, route_idx = costs[i]
-        if node not in destroyed.unassigned:
-            destroyed.unassigned.append(node)
-            for r in destroyed.routes:
-                if node in r:
-                    r.remove(node)
-                    
+    removed_count = 0
+    removed_nodes = set()
+
+    while removed_count < nodes_to_remove:
+        costs = []
+        for route_idx, route in enumerate(destroyed.routes):
+            for i in range(1, len(route) - 1):
+                node = route[i]
+                if node in removed_nodes:
+                    continue
+                prev, next_node = route[i-1], route[i+1]
+                cost = (destroyed.distance_matrix[prev, node] +
+                        destroyed.distance_matrix[node, next_node] -
+                        destroyed.distance_matrix[prev, next_node])
+                costs.append((cost, node, route_idx))
+
+        if not costs:
+            break
+
+        costs.sort(key=lambda x: x[0], reverse=True)
+        _, node, _ = costs[0]
+
+        removed_nodes.add(node)
+        destroyed.unassigned.append(node)
+        for r in destroyed.routes:
+            if node in r:
+                r.remove(node)
+        removed_count += 1
+
     destroyed.routes = [r for r in destroyed.routes if len(r) > 2]
     return destroyed

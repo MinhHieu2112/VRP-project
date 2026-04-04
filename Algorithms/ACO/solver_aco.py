@@ -113,7 +113,7 @@ def run_aco_solver():
     aco_output_dir = os.path.join(output_dir, 'ACO')
     os.makedirs(aco_output_dir, exist_ok=True)
     ResultHandler.save_to_txt(standardized_result, aco_output_dir)
-    ResultHandler.save_to_json(standardized_result, aco_output_dir)
+    # ResultHandler.save_to_json(standardized_result, aco_output_dir)
 
     print("--- Visualizing ---")
     try:

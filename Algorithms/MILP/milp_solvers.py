@@ -56,18 +56,19 @@ def solve_acvrp_milp(matrix, demands, num_vehicles, capacity, timelimit=120):
     prob += lpSum(x[0, j] for j in customers) <= num_vehicles, "Max_Vehicles"
 
     # ── Ràng buộc bảo toàn luồng tại depot ──
-    # Tổng hàng rời depot = tổng demand của tất cả khách hàng
-    # (đảm bảo không có subtour rời khỏi depot mà không quay về)
+    # FIX ①⑥: Thêm cả Depot_Flow_In = 0 để ép xe phải quay về depot (không đứt tuyến)
     total_demand = sum(demands[i] for i in customers)
     prob += lpSum(f[0, j] for j in customers) == total_demand, "Depot_Flow_Out"
+    prob += lpSum(f[j, 0] for j in customers) == 0, "Depot_Flow_In"
 
     # ── Bảo toàn luồng qua từng khách hàng ──
-    # Luồng vào - luồng ra = demand của khách hàng đó
-    # Ràng buộc này tự động loại bỏ subtour vì subtour không kết nối depot
+    # FIX ②: Công thức MCF đúng: flow_out - flow_in = demand[i]
+    # (xe mang hàng TỪ depot, giao dần, demand giảm dần theo tuyến)
+    # Dấu cũ (flow_in - flow_out = demand) sai → subtour không bị loại.
     for i in customers:
         flow_in  = lpSum(f[j, i] for j in nodes if i != j)
         flow_out = lpSum(f[i, j] for j in nodes if i != j)
-        prob += flow_in - flow_out == demands[i], f"FlowConserve_{i}"
+        prob += flow_out - flow_in == demands[i], f"FlowConserve_{i}"
 
     # ── Liên kết biến luồng với biến nhị phân ──
     # f[i,j] > 0 chỉ khi x[i,j] = 1; giới hạn trên bởi capacity
@@ -77,12 +78,15 @@ def solve_acvrp_milp(matrix, demands, num_vehicles, capacity, timelimit=120):
     # ── Gọi solver CBC ──
     solver = PULP_CBC_CMD(timeLimit=timelimit, msg=1)
     status = prob.solve(solver)
+    # FIX ⑤: Kiểm tra status trước, obj_val có thể không None ngay cả khi Infeasible
     status_str = LpStatus[status]
+    if status not in (1, -1):  # 1=Optimal, -1=Infeasible (có thể có incumbent)
+        obj_val = value(prob.objective)
+    else:
+        obj_val = value(prob.objective)
 
-    # Kiểm tra có nghiệm không
-    obj_val = value(prob.objective)
-    if obj_val is None:
-        print("[MILP] Không tìm thấy nghiệm khả thi.")
+    if status == -1 or obj_val is None:
+        print(f"[MILP] Không tìm thấy nghiệm khả thi. Status: {LpStatus[status]}")
         return status_str, None, []
 
     # ── Truy vết các tuyến đường từ nghiệm MILP ──
@@ -135,24 +139,24 @@ def _extract_routes(x, nodes, customers, demands, capacity):
         while curr != 0 and steps < max_steps:
             steps += 1
             next_node = None
+            best_val = 0.5  # ngưỡng chấp nhận
 
             for nxt in nodes:
                 if curr == nxt:
                     continue
                 val = value(x.get((curr, nxt), 0))
-                if val is None or val <= 0.5:
+                if val is None or val <= best_val:
                     continue
 
                 if nxt in visited_nodes and nxt != 0:
-                    # Phát hiện chu trình con — lỗi từ solver (nghiệm không tối ưu)
                     print(f"[CẢNH BÁO] Chu trình con phát hiện tại node {nxt}, "
                           f"tuyến sẽ bị cắt ngắn.")
-                    nxt = 0  # Buộc về depot để kết thúc tuyến an toàn
-                    next_node = nxt
+                    next_node = 0
+                    best_val = val
                     break
 
                 next_node = nxt
-                break
+                best_val = val  # tiếp tục tìm cạnh có giá trị cao hơn
 
             if next_node is None:
                 # Cạnh tiếp theo bị đứt — có thể do nghiệm xấp xỉ (timelimit)

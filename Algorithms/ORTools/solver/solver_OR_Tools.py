@@ -82,7 +82,7 @@ class ORToolsSolver:
         params = pywrapcp.DefaultRoutingSearchParameters()
         
         # Ánh xạ First Solution Strategy
-        fs_str = solver_cfg.get("first_solution_strategy", "PATH_CHEAPEST_ARC")
+        fs_str = solver_cfg.get("first_solution_strategy", "PARALLEL_CHEAPEST_INSERTION")
         params.first_solution_strategy = getattr(routing_enums_pb2.FirstSolutionStrategy, fs_str)
         
         # Ánh xạ Metaheuristic (Xử lý khoảng trắng nếu có)

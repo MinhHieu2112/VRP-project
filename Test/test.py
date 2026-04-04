@@ -1,107 +1,175 @@
 import re
 import os
-import pandas as pd # Đảm bảo bạn đã cài đặt pandas: pip install pandas
+import argparse
+import pandas as pd
 
+
+# =========================
+# 1. PARSE ROUTES
+# =========================
 def extract_routes_from_text(file_path):
     """
-    Bóc tách các tuyến đường từ file txt, xử lý các tag hoặc.
+    Trích xuất các route từ file txt.
+    Hỗ trợ format:
+    - Xe #001: 0 -> 5 -> 10 -> 0
+    - Route #001: 0 -> 5 -> 10 -> 0 (cost = xxx)
     """
     if not os.path.exists(file_path):
-        print(f"Lỗi: Không tìm thấy file kết quả tại {file_path}")
-        return []
+        raise FileNotFoundError(f"Không tìm thấy file: {file_path}")
 
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        
-        # Loại bỏ các tag nhiễu thường gặp trong dữ liệu
-        clean_content = re.sub(r'\\', '', content)
-        clean_content = re.sub(r'\\', '', clean_content)
-        
-        # Tìm các đoạn nội dung sau "Route #x:"
-        route_patterns = re.findall(r'Route\s*#\d+:(.*?)(?=Route\s*#|$)', clean_content, re.DOTALL)
-        
-        routes = []
-        for p in route_patterns:
-            nodes = [int(node) for node in p.split() if node.strip().isdigit()]
-            if nodes:
-                routes.append(nodes)
-        return routes
-    except Exception as e:
-        print(f"Lỗi khi xử lý file văn bản: {e}")
-        return []
+    routes = []
 
+    with open(file_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            if ("Xe #" in line or "Route #" in line) and "->" in line:
+                try:
+                    # Lấy phần sau dấu :
+                    route_part = line.split(":")[-1].strip()
+
+                    # Loại bỏ phần (cost = ...)
+                    route_clean = route_part.split("(")[0].strip()
+
+                    # Parse theo dấu ->
+                    nodes = [int(x.strip()) for x in route_clean.split("->")]
+
+                    if len(nodes) >= 2:
+                        routes.append(nodes)
+
+                except Exception as e:
+                    print(f"[WARN] Lỗi parse dòng: {line.strip()} | {e}")
+
+    return routes
+
+
+# =========================
+# 2. LOAD DISTANCE MATRIX
+# =========================
 def load_distance_matrix(csv_path):
-    """
-    Đọc ma trận khoảng cách từ file CSV.
-    Giả định file CSV không có header và các hàng/cột tương ứng với ID của node.
-    """
     if not os.path.exists(csv_path):
-        print(f"Lỗi: Không tìm thấy file ma trận tại {csv_path}")
-        return None
+        raise FileNotFoundError(f"Không tìm thấy file: {csv_path}")
 
-    try:
-        print(f"--- Đang nạp ma trận từ {csv_path} ---")
-        # Đọc CSV không có tiêu đề, chuyển thành mảng 2 chiều
-        df = pd.read_csv(csv_path, header=None)
-        return df.values
-    except Exception as e:
-        print(f"Lỗi khi đọc file CSV: {e}")
-        return None
+    df = pd.read_csv(csv_path, header=None)
+    return df.values
 
-def verify_optimization(routes, distance_matrix, depot_id=0):
-    """
-    Tính toán lại tổng quãng đường bằng cách cộng dồn giá trị từ ma trận.
-    """
-    total_distance = 0.0
-    
+
+# =========================
+# 3. VALIDATION
+# =========================
+def validate_routes(routes, matrix):
+    n = len(matrix)
+    visited = set()
+
     for i, route in enumerate(routes):
-        route_dist = 0.0
-        # Xe đi từ Kho -> Lộ trình khách hàng -> Quay về Kho
-        full_path = [depot_id] + route + [depot_id]
-        
-        for j in range(len(full_path) - 1):
-            u, v = full_path[j], full_path[j+1]
-            try:
-                dist = distance_matrix[u][v]
-                route_dist += dist
-            except IndexError:
-                print(f"Lỗi: Node {u} hoặc {v} vượt quá kích thước ma trận ({len(distance_matrix)}x{len(distance_matrix)}).")
-                return None
-        
-        total_distance += route_dist
-        if i < 3: # In thử 3 lộ trình đầu tiên để kiểm soát
-            print(f"Xe #{i+1:03d} | Số điểm: {len(route):02d} | Quãng đường: {route_dist:.2f} km")
-            
+        # Check depot
+        if route[0] != 0 or route[-1] != 0:
+            print(f"[WARN] Route #{i} không bắt đầu/kết thúc tại depot: {route}")
+
+        # Check index hợp lệ
+        for node in route:
+            if node < 0 or node >= n:
+                raise ValueError(f"Node {node} vượt kích thước ma trận ({n})")
+
+        # Collect visited (bỏ depot)
+        visited.update(route[1:-1])
+
+    # Check missing node
+    expected = set(range(1, n))
+    missing = expected - visited
+    extra = visited - expected
+
+    if missing:
+        print(f"[WARN] Thiếu node: {sorted(missing)[:10]} ...")
+
+    if extra:
+        print(f"[WARN] Node dư: {sorted(extra)[:10]} ...")
+
+    print(f"[INFO] Số node đã phục vụ: {len(visited)}/{n-1}")
+
+
+# =========================
+# 4. VERIFY DISTANCE
+# =========================
+def verify_optimization(routes, matrix, scaling=1.0, debug_limit=10):
+    total_distance = 0
+
+    print(f"{'Phương tiện':<15} | {'Số điểm':<10} | {'Quãng đường (km)':<15}")
+    print("-" * 50)
+
+    for i, route in enumerate(routes):
+        route_dist = 0
+
+        for j in range(len(route) - 1):
+            u, v = route[j], route[j + 1]
+            route_dist += float(matrix[u][v])
+
+        dist_km = route_dist / scaling
+        total_distance += dist_km
+
+        if i < debug_limit:
+            print(f"Route #{i:03d}       | {len(route)-2:<10} | {dist_km:>15.2f}")
+
+    if len(routes) > debug_limit:
+        print(f"... và {len(routes) - debug_limit} route khác.")
+
     return total_distance
 
-if __name__ == "__main__":
-    # 1. Cấu hình đường dẫn (Điều chỉnh nếu cần thiết)
-    RESULT_TXT = '../Results/ORTools/solver_result.txt' 
-    MATRIX_CSV = '../Data/orsm_matrix.csv'
-    DEPOT = 0 
 
-    # 2. Thực hiện trích xuất lộ trình
-    print("--- BẮT ĐẦU QUY TRÌNH XÁC THỰC ---")
-    routes = extract_routes_from_text(RESULT_TXT)
-    
+# =========================
+# 5. MAIN
+# =========================
+def main():
+    parser = argparse.ArgumentParser(description="Verify VRP solution")
+
+    parser.add_argument("--result", type=str, required=True,
+                        help="File txt chứa kết quả route để kiểm tra")
+    parser.add_argument("--matrix", type=str, required=True,
+                        help="File CSV chứa ma trận khoảng cách")
+    parser.add_argument("--scaling", type=float, default=1.0,
+                        help="Scaling factor")
+    parser.add_argument("--original", type=float, default=None,
+                        help="Giá trị cost gốc để so sánh")
+
+    args = parser.parse_args()
+
+    print("=== VERIFY VRP SOLUTION ===")
+
+    # 1. Extract routes
+    routes = extract_routes_from_text(args.result)
+
     if not routes:
-        print("Không tìm thấy lộ trình hợp lệ để xử lý.")
-    else:
-        # 3. Nạp ma trận thực tế
-        actual_matrix = load_distance_matrix(MATRIX_CSV)
-        
-        if actual_matrix is not None:
-            print(f"Đã nạp ma trận. Kích thước: {len(actual_matrix)}x{len(actual_matrix[0])}")
-            print(f"Đã trích xuất: {len(routes)} xe từ file kết quả.")
-            
-            # 4. Tính toán và đối chiếu
-            print("\n--- CHI TIẾT TÍNH TOÁN LẠI ---")
-            recalculated_dist = verify_optimization(routes, actual_matrix, DEPOT)
-            
-            if recalculated_dist is not None:
-                print("-" * 45)
-                print(f"KẾT QUẢ CUỐI CÙNG:")
-                print(f" - Tổng số xe sử dụng: {len(routes)}")
-                print(f" - Tổng quãng đường tính lại: {recalculated_dist:.2f} km")
-                print("-" * 45)
+        print("[-] Không tìm thấy route.")
+        return
+
+    print(f"[+] Số route: {len(routes)}")
+
+    # 2. Load matrix
+    matrix = load_distance_matrix(args.matrix)
+    print(f"[+] Kích thước ma trận: {matrix.shape}")
+
+    # 3. Validate
+    print("\n--- VALIDATION ---")
+    validate_routes(routes, matrix)
+
+    # 4. Verify distance
+    print("\n--- RE-CALCULATE DISTANCE ---")
+    recalculated = verify_optimization(routes, matrix, args.scaling)
+
+    print("\n" + "=" * 50)
+    print(f"TỔNG QUÃNG ĐƯỜNG: {recalculated:.4f} km")
+
+    # 5. Compare với kết quả gốc
+    if args.original is not None:
+        gap = abs(recalculated - args.original)
+        print(f"GAP so với kết quả gốc: {gap:.4f} km")
+
+    print("=" * 50)
+
+
+if __name__ == "__main__":
+    main()
+
+
+# Sample usage:
+#python test.py \
+#  --result ../Results/SA/result_sa.txt \
+#  --matrix ../Data/orsm_matrix.csv

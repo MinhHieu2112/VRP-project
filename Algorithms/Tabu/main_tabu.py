@@ -185,7 +185,7 @@ def main():
     output_dir = os.path.join(PROJECT_ROOT, "Results", "Tabu")
     os.makedirs(output_dir, exist_ok=True)
     ResultHandler.save_to_txt(standardized_result, output_dir)
-    ResultHandler.save_to_json(standardized_result, output_dir)
+    # ResultHandler.save_to_json(standardized_result, output_dir)
 
     # ── 10. Trực quan hóa ──
     print("--- Đang khởi tạo bản đồ trực quan ---")

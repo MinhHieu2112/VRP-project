@@ -77,7 +77,8 @@ def run_sa():
     # Lọc chỉ giữ route có khách hàng, đánh lại index từ 0
     clean_routes = {}
     idx = 0
-    for k, route in routes.items():
+    
+    for k, route in enumerate(routes):
         if len(route) > 2:
             clean_routes[idx] = route
             idx += 1
@@ -101,7 +102,7 @@ def run_sa():
     os.makedirs(output_dir, exist_ok=True)
 
     ResultHandler.save_to_txt(standardized_result, output_dir)
-    ResultHandler.save_to_json(standardized_result, output_dir)
+    # ResultHandler.save_to_json(standardized_result, output_dir)
 
     # ===== TRỰC QUAN HÓA BẰNG VISUALIZER CHUNG =====
     print("--- Đang khởi tạo bản đồ trực quan ---")

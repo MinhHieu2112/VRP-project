@@ -15,7 +15,6 @@
         "penalty_vehicle_over": 500000
     },
     "alns_parameters": {
-        "max_runtime": 180,
         "start_temperature": 1000,
         "end_temperature": 1,
         "step": 0.9997,

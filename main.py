@@ -138,7 +138,7 @@ def run_integrated(solver_type):
     os.makedirs(solver_output_dir, exist_ok=True)
 
     ResultHandler.save_to_txt(standardized_result, solver_output_dir)
-    ResultHandler.save_to_json(standardized_result, solver_output_dir)
+    # ResultHandler.save_to_json(standardized_result, solver_output_dir)
 
     print(f"--- Đang trực quan hóa lộ trình ---")
     try:
@@ -200,7 +200,7 @@ def show_menu():
         print(f"  [{num}] {algo['name']}")
 
     print(f"\n  [0] Thoát")
-    print(f"  [9] Chạy TẤT CẢ (trừ MILP)")
+    print(f"  [8] Chạy TẤT CẢ (trừ MILP)")
     print("-" * 60)
 
 
@@ -215,7 +215,7 @@ def main():
                 print("Tạm biệt!")
                 break
 
-            if choice == '9':
+            if choice == '8':
                 # Chạy tất cả (trừ MILP vì giới hạn 350 nodes)
                 print("\n>>> CHẠY TẤT CẢ THUẬT TOÁN <<<\n")
                 for num, algo in ALGORITHMS.items():
