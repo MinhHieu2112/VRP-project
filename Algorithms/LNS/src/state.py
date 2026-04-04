@@ -98,14 +98,14 @@ class CvrpState(State):
         """Trả về chi phí (quãng đường) để ALNS sử dụng làm chỉ số so sánh."""
         return self.objective()
 
-    def get_route_load(self, route):
+    def get_route_load(route, demands):
         """Hàm bổ trợ tính tổng hàng hiện có trên một lộ trình."""
-        return sum(self.demands[node] for node in route)
+        return sum(demands[node] for node in route if node != 0)
 
     def is_valid(self):
         """Kiểm tra xem lời giải hiện tại có vi phạm ràng buộc sức chứa không."""
         for route in self.routes:
-            if self.get_route_load(route) > self.capacity:
+            if self.get_route_load(route, self.demands) > self.capacity:
                 return False
         return True
     

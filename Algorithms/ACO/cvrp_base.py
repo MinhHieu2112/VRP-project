@@ -6,85 +6,102 @@ class Node:
     def __init__(self, id: int, x: float, y: float, demand: float):
         super()
         self.id = id
-
-        if id == 0:
-            self.is_depot = True
-        else:
-            self.is_depot = False
-
+        self.is_depot = (id == 0)
         self.x = x
         self.y = y
         self.demand = demand
 
 
 class CVRPGraph:
-    def __init__(self, node_num, nodes, node_dist_mat, vehicle_capacity, rho=0.1):
+    def __init__(self, node_num, nodes, node_dist_mat, vehicle_capacity,
+                 rho=0.1,          # Global evaporation rate
+                 xi=0.01):         # [FIX C4] Local update rate riêng biệt (ACS gốc dùng ξ ≈ 0.01–0.1)
         super()
         self.node_num = node_num
         self.nodes = nodes
-        self.node_dist_mat = node_dist_mat
+        self.node_dist_mat = node_dist_mat.astype(np.float64)
         self.vehicle_capacity = vehicle_capacity
         self.rho = rho
+        self.xi = xi   # [FIX C4] tách biệt local update rate
 
-        # Initialize pheromone
-        self.nnh_travel_path, self.init_pheromone_val, _ = self.nearest_neighbor_heuristic()
-        self.init_pheromone_val = 1 / (self.init_pheromone_val * self.node_num)
+        # Khởi tạo pheromone từ NNH solution
+        # [FIX S2] Không giới hạn max_vehicle_num để đảm bảo solution đầy đủ
+        self.nnh_travel_path, nnh_distance, _ = self.nearest_neighbor_heuristic()
+        if nnh_distance <= 0:
+            nnh_distance = 1.0  # guard tránh chia 0
+        self.init_pheromone_val = 1.0 / (nnh_distance * self.node_num)
 
-        self.pheromone_mat = np.ones((self.node_num, self.node_num)) * self.init_pheromone_val
-        # Heuristic info matrix - avoid division by zero
-        heuristic_mat = np.copy(self.node_dist_mat)
-        # Replace any zero distances with a very small value to avoid inf
-        heuristic_mat[heuristic_mat == 0] = 1e-10
-        self.heuristic_info_mat = 1 / heuristic_mat
-        # Ensure no inf or nan values
-        self.heuristic_info_mat = np.nan_to_num(self.heuristic_info_mat, nan=0.0, posinf=1e10, neginf=0.0)
+        self.pheromone_mat = np.full(
+            (self.node_num, self.node_num),
+            self.init_pheromone_val,
+            dtype=np.float64
+        )
 
-    def copy(self, init_pheromone_val):
-        new_graph = copy.deepcopy(self)
-        new_graph.init_pheromone_val = init_pheromone_val
-        new_graph.pheromone_mat = np.ones((new_graph.node_num, new_graph.node_num)) * init_pheromone_val
-        return new_graph
+        # [FIX S3] Heuristic matrix: xử lý đúng
+        # Chỉ zero diagonal, KHÔNG gán 1e-10 cho off-diagonal zeros
+        heuristic_mat = self.node_dist_mat.copy()
+        # Off-diagonal zeros = 2 địa điểm trùng vị trí → heuristic = 0 (không hấp dẫn đặc biệt)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            self.heuristic_info_mat = np.where(heuristic_mat > 0, 1.0 / heuristic_mat, 0.0)
+        # Diagonal luôn = 0 (không có self-loop)
+        np.fill_diagonal(self.heuristic_info_mat, 0.0)
 
-    @staticmethod
-    def calculate_dist(node_a, node_b):
-        return np.linalg.norm((node_a.x - node_b.x, node_a.y - node_b.y))
+    # ------------------------------------------------------------------ #
+    #  Pheromone Updates                                                   #
+    # ------------------------------------------------------------------ #
 
     def local_update_pheromone(self, start_ind, end_ind):
-        self.pheromone_mat[start_ind][end_ind] = (1 - self.rho) * self.pheromone_mat[start_ind][end_ind] + \
-                                                  self.rho * self.init_pheromone_val
+        """
+        [FIX C4] Local update dùng xi (ξ) riêng, không dùng chung rho.
+        Công thức ACS: τ_ij ← (1-ξ)·τ_ij + ξ·τ_0
+        """
+        self.pheromone_mat[start_ind][end_ind] = (
+            (1 - self.xi) * self.pheromone_mat[start_ind][end_ind]
+            + self.xi * self.init_pheromone_val
+        )
 
     def global_update_pheromone(self, best_path, best_path_distance):
-        self.pheromone_mat = (1 - self.rho) * self.pheromone_mat
+        """
+        Global update chỉ reinforce best path, evaporate toàn bộ.
+        Công thức ACS: τ_ij ← (1-ρ)·τ_ij + ρ/L_best
+        """
+        if best_path_distance <= 0:
+            return
+        self.pheromone_mat *= (1 - self.rho)
         current_ind = best_path[0]
         for next_ind in best_path[1:]:
             self.pheromone_mat[current_ind][next_ind] += self.rho / best_path_distance
             current_ind = next_ind
 
-    def nearest_neighbor_heuristic(self, max_vehicle_num=None):
+    # ------------------------------------------------------------------ #
+    #  Nearest Neighbor Heuristic (để khởi tạo pheromone)                 #
+    # ------------------------------------------------------------------ #
+
+    def nearest_neighbor_heuristic(self):
+        """
+        [FIX S2] Bỏ giới hạn max_vehicle_num.
+        NNH phải cover TẤT CẢ customers để init_pheromone_val hợp lệ.
+        """
         index_to_visit = list(range(1, self.node_num))
         current_index = 0
         current_load = 0
-        travel_distance = 0
+        travel_distance = 0.0
         travel_path = [0]
 
-        if max_vehicle_num is None:
-            max_vehicle_num = self.node_num
-
-        while len(index_to_visit) > 0 and max_vehicle_num > 0:
-            nearest_next_index = self._cal_nearest_next_index(index_to_visit, current_index, current_load)
-
-            if nearest_next_index is None:
+        while index_to_visit:
+            nearest = self._cal_nearest_next_index(index_to_visit, current_index, current_load)
+            if nearest is None:
+                # Quay về depot, bắt đầu vehicle mới
                 travel_distance += self.node_dist_mat[current_index][0]
-                current_load = 0
                 travel_path.append(0)
                 current_index = 0
-                max_vehicle_num -= 1
+                current_load = 0
             else:
-                current_load += self.nodes[nearest_next_index].demand
-                travel_distance += self.node_dist_mat[current_index][nearest_next_index]
-                travel_path.append(nearest_next_index)
-                current_index = nearest_next_index
-                index_to_visit.remove(nearest_next_index)
+                current_load += self.nodes[nearest].demand
+                travel_distance += self.node_dist_mat[current_index][nearest]
+                travel_path.append(nearest)
+                current_index = nearest
+                index_to_visit.remove(nearest)
 
         travel_distance += self.node_dist_mat[current_index][0]
         travel_path.append(0)
@@ -94,17 +111,18 @@ class CVRPGraph:
     def _cal_nearest_next_index(self, index_to_visit, current_index, current_load):
         nearest_ind = None
         nearest_distance = None
-
         for next_index in index_to_visit:
             if current_load + self.nodes[next_index].demand > self.vehicle_capacity:
                 continue
-
             dist = self.node_dist_mat[current_index][next_index]
             if nearest_distance is None or dist < nearest_distance:
                 nearest_distance = dist
                 nearest_ind = next_index
-
         return nearest_ind
+
+    @staticmethod
+    def calculate_dist(node_a, node_b):
+        return np.linalg.norm((node_a.x - node_b.x, node_a.y - node_b.y))
 
 
 class PathMessage:
