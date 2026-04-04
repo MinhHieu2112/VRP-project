@@ -50,27 +50,20 @@ ALGORITHMS = {
         "cwd": os.path.join(PROJECT_ROOT, "Algorithms", "ALNS")
     },
     5: {
-        "name": "LNS (Large Neighborhood Search)",
-        "key": "lns",
-        "mode": "subprocess",
-        "script": os.path.join(PROJECT_ROOT, "Algorithms", "LNS", "main.py"),
-        "cwd": os.path.join(PROJECT_ROOT, "Algorithms", "LNS")
-    },
-    6: {
         "name": "SA (Simulated Annealing)",
         "key": "sa",
         "mode": "subprocess",
         "script": os.path.join(PROJECT_ROOT, "Algorithms", "SA", "main.py"),
         "cwd": os.path.join(PROJECT_ROOT, "Algorithms", "SA")
     },
-    7: {
+    6: {
         "name": "Tabu Search",
         "key": "tabu",
         "mode": "subprocess",
         "script": os.path.join(PROJECT_ROOT, "Algorithms", "Tabu", "main_tabu.py"),
         "cwd": os.path.join(PROJECT_ROOT, "Algorithms", "Tabu")
     },
-    8: {
+    7: {
         "name": "MILP (Mixed Integer Linear Programming)",
         "key": "milp",
         "mode": "subprocess",
