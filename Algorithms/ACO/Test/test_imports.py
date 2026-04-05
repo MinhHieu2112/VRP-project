@@ -10,8 +10,8 @@ except ImportError as e:
     print(f"Import error: {e}")
 
 try:
-    from cvrp_base import CVRPGraph, Node
-    from basic_aco import BasicACO
+    from Algorithms.ACO.Models.cvrp_base import CVRPGraph, Node
+    from Algorithms.ACO.Core.engine import BasicACO
     print("ACO imports OK")
 except ImportError as e:
     print(f"ACO import error: {e}")

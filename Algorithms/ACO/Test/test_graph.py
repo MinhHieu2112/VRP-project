@@ -43,7 +43,7 @@ nans = np.sum(np.isnan(node_dist_mat))
 print(f"Zeros: {zeros}, Infs: {infs}, NaNs: {nans}")
 
 print("Creating graph...")
-from cvrp_base import CVRPGraph, Node
+from Algorithms.ACO.Models.cvrp_base import CVRPGraph, Node
 import json
 
 graph = CVRPGraph(node_num, nodes, node_dist_mat, vehicle_capacity)

@@ -79,16 +79,15 @@ class CvrpState(State):
         print("\n[XONG] Đã tối ưu xong toàn bộ lộ trình.")
  
     def copy(self):
-        new_state = CvrpState(
-            [r[:] for r in self.routes],
-            self.unassigned[:],
-            self.distance_matrix,
-            self.capacity,
-            self.demands,
-            self.config
-        )
-        # Copy cả bộ nhớ đệm tải trọng
-        new_state.route_loads = self.route_loads[:]
+        # Bypass __init__ để tránh tính lại route_loads (O(n)) mỗi lần copy
+        new_state = object.__new__(CvrpState)
+        new_state.routes = [r[:] for r in self.routes]
+        new_state.unassigned = self.unassigned[:]
+        new_state.distance_matrix = self.distance_matrix  # shared, read-only
+        new_state.capacity = self.capacity
+        new_state.demands = self.demands                   # shared, read-only
+        new_state.config = self.config                     # shared, read-only
+        new_state.route_loads = self.route_loads[:]        # copy cache trực tiếp
         return new_state
  
     @property
@@ -108,4 +107,4 @@ class CvrpState(State):
         cost = 0
         for i in range(len(route) - 1):
             cost += self.distance_matrix[route[i], route[i+1]]
-        return cost
+        return cost   

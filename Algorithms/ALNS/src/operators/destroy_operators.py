@@ -2,51 +2,65 @@ import random
 import numpy as np
 
 def get_nodes_to_remove(state):
-    """Xác định số lượng nút cần xóa (thường từ 5-15% tổng số điểm)."""
-    num_nodes = len(state.distance_matrix) - 1 # Trừ kho
-    return int(num_nodes * random.uniform(0.05, 0.1))
+    """
+    Xóa 5-10% số khách ĐANG TRONG ROUTES, không phải tổng ma trận.
+    Giới hạn tối đa 30 node để repair không bị quá tải.
+    """
+    num_clients_in_routes = sum(
+        len(r) - 2 for r in state.routes if len(r) > 2
+    )
+    n_remove = int(num_clients_in_routes * random.uniform(0.05, 0.10))
+    return max(1, min(n_remove, 30))
+
+
+def _cleanup_empty_routes(state):
+    """
+    Xóa các route trống ([0, 0]) và đồng bộ route_loads.
+    BUG FIX: trước đây chỉ lọc routes mà không cập nhật route_loads,
+    khiến route_loads dài hơn routes → IndexError trong repair operators.
+    """
+    kept = [(r, load) for r, load in zip(state.routes, state.route_loads) if len(r) > 2]
+    if kept:
+        state.routes, state.route_loads = map(list, zip(*kept))
+    else:
+        state.routes = []
+        state.route_loads = []
+
 
 def random_removal(state, random_state):
     """Xóa ngẫu nhiên các khách hàng."""
     destroyed = state.copy()
     nodes_to_remove = get_nodes_to_remove(state)
-    
+
     # Lấy tất cả khách hàng hiện có trong các route (trừ kho 0)
     all_clients = []
     for route in destroyed.routes:
         all_clients.extend([node for node in route if node != 0])
-    
+
     if not all_clients:
         return destroyed
 
     nodes_to_remove = min(nodes_to_remove, len(all_clients))
     to_remove = random_state.choice(all_clients, nodes_to_remove, replace=False)
-    
+
     for node in to_remove:
         destroyed.unassigned.append(node)
-        for route in destroyed.routes:
+        for r_idx, route in enumerate(destroyed.routes):
             if node in route:
                 route.remove(node)
-                
-    # Dọn dẹp các route trống (chỉ còn [0, 0])
-    destroyed.routes = [r for r in destroyed.routes if len(r) > 2]
+                destroyed.route_loads[r_idx] -= destroyed.demands[node]
+                break
+
+    # Dọn dẹp các route trống — đồng bộ cả route_loads
+    _cleanup_empty_routes(destroyed)
     return destroyed
+
 
 def worst_removal(state, random_state):
     """Xóa những khách hàng có chi phí đóng góp vào route cao nhất."""
     destroyed = state.copy()
     nodes_to_remove = get_nodes_to_remove(state)
-    
-    costs = []
-    for route_idx, route in enumerate(destroyed.routes):
-        for i in range(1, len(route) - 1):
-            prev, node, next_node = route[i-1], route[i], route[i+1]
-            # Chi phí tiết kiệm được nếu xóa nút này (đối với ma trận bất đối xứng)
-            cost = (state.distance_matrix[prev, node] + 
-                    state.distance_matrix[node, next_node] - 
-                    state.distance_matrix[prev, next_node])
-            costs.append((cost, node, route_idx))
-    
+
     removed_count = 0
     removed_nodes = set()
 
@@ -71,10 +85,13 @@ def worst_removal(state, random_state):
 
         removed_nodes.add(node)
         destroyed.unassigned.append(node)
-        for r in destroyed.routes:
+        for r_idx, r in enumerate(destroyed.routes):
             if node in r:
                 r.remove(node)
+                destroyed.route_loads[r_idx] -= destroyed.demands[node]
+                break
         removed_count += 1
 
-    destroyed.routes = [r for r in destroyed.routes if len(r) > 2]
+    # Dọn dẹp các route trống — đồng bộ cả route_loads
+    _cleanup_empty_routes(destroyed)
     return destroyed

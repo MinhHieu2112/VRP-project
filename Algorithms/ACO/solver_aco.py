@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
-from cvrp_base import CVRPGraph, Node
-from basic_aco import BasicACO
+from Models.cvrp_base import CVRPGraph, Node
+from Core.engine import BasicACO
 import os
 import sys
 import json
@@ -11,7 +11,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 from Utils.ResultHandler import ResultHandler
 from Utils.Visualizer import Visualizer
 
-print("Starting ACO solver (Fixed Version)...")
+print("Starting ACO solver...")
 
 
 def load_data(locations_file, matrix_file):
@@ -36,8 +36,8 @@ def load_data(locations_file, matrix_file):
 
 def parse_routes(best_path: list) -> dict:
     """
-    Parse flat path (vd [0,1,2,0,3,4,0]) thành dict routes.
-    [FIX S4] Bỏ qua route rỗng (depot→depot).
+    Parse flat path [0,1,2,0,3,4,0] thành dict routes.
+    Bỏ qua route rỗng (depot→depot).
     """
     routes = {}
     vehicle_id = 0
@@ -71,17 +71,16 @@ def run_aco_solver():
     matrix_file = os.path.join(os.path.dirname(__file__), '..', '..', config['paths']['distance_matrix'])
     output_dir = os.path.join(os.path.dirname(__file__), '..', '..', config['paths']['output_dir'])
     vehicle_capacity = config['global_constraints']['vehicle_capacity']
-    scaling_factor = config['common_model_parameters']['scaling_factor']
-
     print(f"Vehicle capacity: {vehicle_capacity}")
 
     node_num, nodes, node_dist_mat = load_data(locations_file, matrix_file)
 
-    print("Creating graph...")
+    # CVRPGraph tự động validate dữ liệu đầu vào (raise ValueError nếu lỗi)
+    print("Creating graph (with validation)...")
     graph = CVRPGraph(
         node_num, nodes, node_dist_mat, vehicle_capacity,
-        rho=0.1,   # Global evaporation
-        xi=0.01    # [FIX C4] Local update rate (ACS gốc ξ = 0.1, thử nhỏ hơn cho ổn định)
+        rho=0.1,
+        xi=0.01
     )
 
     print("Running ACO...")
@@ -90,21 +89,35 @@ def run_aco_solver():
         graph,
         ants_num=20,
         max_iter=100,
-        alpha=1,        # [FIX C1] Alpha rõ ràng
+        alpha=1,
         beta=2,
-        q0=0.9,         # [FIX M3] Exploitation-first
+        q0=0.9,
         no_improve_limit=50
     )
     best_path, best_distance, best_vehicles = aco.run_basic_aco()
     execution_time = time.time() - start_time
 
-    print(f"\nACO Done: dist={best_distance:.2f}, vehicles={best_vehicles}, time={execution_time:.2f}s")
+    print(f"\nACO Done: dist={best_distance / 1000:.2f}, vehicles={best_vehicles}, "
+          f"time={execution_time:.2f}s")
 
     routes_dict = parse_routes(best_path)
 
+    # Kiểm tra tất cả customer đã được phục vụ
+    served = set()
+    for route in routes_dict.values():
+        for node in route:
+            if node != 0:
+                served.add(node)
+    all_customers = set(range(1, node_num))
+    missing = all_customers - served
+    if missing:
+        print(f"[WARN] {len(missing)} customer chưa được phục vụ: {sorted(missing)[:10]}")
+    else:
+        print(f"[OK] Tất cả {len(all_customers)} customer đã được phục vụ")
+
     standardized_result = {
-        "solver_name": "ACO_Fixed",
-        "total_distance_km": best_distance / scaling_factor,
+        "solver_name": "ACO",
+        "total_distance_km": best_distance / 1000,  # Ma trận đã ở đơn vị m, cần chia 1000 để chuyển thành km
         "execution_time": execution_time,
         "routes": routes_dict,
         "num_vehicles": best_vehicles
@@ -113,7 +126,6 @@ def run_aco_solver():
     aco_output_dir = os.path.join(output_dir, 'ACO')
     os.makedirs(aco_output_dir, exist_ok=True)
     ResultHandler.save_to_txt(standardized_result, aco_output_dir)
-    # ResultHandler.save_to_json(standardized_result, aco_output_dir)
 
     print("--- Visualizing ---")
     try:
@@ -138,7 +150,11 @@ if __name__ == '__main__':
     try:
         run_aco_solver()
         print("ACO solver completed successfully!")
+    except ValueError as e:
+        print(f"[INPUT ERROR] {e}")
+        sys.exit(1)
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"[ERROR] {e}")
         import traceback
         traceback.print_exc()
+        sys.exit(1)
