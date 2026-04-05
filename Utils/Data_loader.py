@@ -21,7 +21,6 @@ class DataLoader:
         num_vehicles = constraints.get('max_vehicles', 200)
         vehicle_capacity = constraints.get('vehicle_capacity', 10)
         default_demand = constraints.get('default_demand', 1)
-        scaling_factor = self.config.get('common_model_parameters', {}).get('scaling_factor', 100)
 
         # 2. Đọc ma trận khoảng cách
         if not os.path.exists(self.matrix_path):
@@ -29,9 +28,9 @@ class DataLoader:
             
         df_matrix = pd.read_csv(self.matrix_path, header=None)
         matrix_float = np.nan_to_num(df_matrix.values.astype(float), nan=0.0)
-        
-        # Thực hiện Scaling (ví dụ từ 1.23 km thành 123 đơn vị nguyên)
-        matrix_int = np.round(matrix_float * scaling_factor).astype(np.int64)
+
+        # Ma trận đã được làm sạch, giữ nguyên giá trị gốc (đơn vị: km)
+        matrix_int = np.round(matrix_float).astype(np.int64)
         matrix_int[matrix_int < 0] = 0
 
         # 3. Đọc file tọa độ khách hàng
@@ -51,7 +50,6 @@ class DataLoader:
 
         return {
             "distance_matrix": matrix_int,
-            "scaling_factor": scaling_factor,
             "num_vehicles": num_vehicles,
             "depot": 0,
             "demands": demands,

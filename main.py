@@ -107,10 +107,9 @@ def run_integrated(solver_type):
             routes_dict[i] = [0] + route.visits() + [0]
 
         total_distance = res.best.distance()
-        scaling_factor = config['common_model_parameters']['scaling_factor']
         standardized_result = {
             "solver_name": "PyVRP",
-            "total_distance_km": total_distance / scaling_factor,
+            "total_distance_km": total_distance / 1000,  # Ma trận đã ở đơn vị m, cần chia 1000 để chuyển thành km
             "execution_time": time.time() - start_time,
             "routes": routes_dict,
             "num_vehicles": len(routes_dict)
