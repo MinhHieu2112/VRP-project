@@ -92,15 +92,12 @@ def run_integrated(solver_type):
     loader = DataLoader(config)
     data_bundle = loader.load_data()
 
-    solver_cfg = config['solvers'].get(solver_type, {})
-    time_limit = solver_cfg.get('time_limit_seconds', 300)
-
     start_time = time.time()
     standardized_result = {}
 
     if solver_type == "py_vrp":
         solver = PyVRPSolver(data_bundle['distance_matrix'], config['global_constraints'])
-        res = solver.solve(time_limit=time_limit)
+        res = solver.solve(no_improve_iters=40000)
 
         routes_dict = {}
         for i, route in enumerate(res.best.routes()):

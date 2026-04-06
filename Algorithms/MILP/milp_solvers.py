@@ -1,141 +1,128 @@
+# milp_solvers.py — implement đúng theo mô hình MTZ trong báo cáo
+
 from pulp import *
 
 def solve_acvrp_milp(matrix, demands, num_vehicles, capacity, timelimit=120):
     """
-    Giải bài toán ACVRP bằng MILP (công thức Multi-Commodity Flow).
+    MILP cho ACVRP dùng công thức MTZ (Miller-Tucker-Zemlin),
+    đúng theo mô hình toán trong báo cáo nghiên cứu (mục 2.1.5).
 
-    Ma trận đầu vào: đơn vị mét (số nguyên, OSRM).
-    Hàm mục tiêu tối thiểu tổng mét — caller chia 1000 để đổi sang km.
+    Biến:
+        x[i,j] ∈ {0,1}: xe đi từ i đến j
+        u[i] ∈ [d_i, Q]: tải trọng tích lũy sau khi phục vụ i (biến MTZ)
 
-    Mô hình MCF:
-    - x[i,j] ∈ {0,1}: xe có đi từ i đến j không
-    - f[i,j] ≥ 0    : lượng hàng tích lũy xe mang trên cạnh (i,j)
+    Ràng buộc:
+        1. Mỗi khách hàng được vào đúng 1 lần
+        2. Mỗi khách hàng được ra đúng 1 lần
+        3. Số xe xuất phát và quay về ≤ K
+        4. MTZ: u_i - u_j + Q*x_ij ≤ Q - d_j (loại subtour + kiểm soát tải)
+        5. d_i ≤ u_i ≤ Q
 
-    Ràng buộc bảo toàn luồng (đúng chiều):
-      Depot: tổng flow xuất = total_demand, tổng flow nhập = total_demand
-      Customer i: flow_in(i) - flow_out(i) = demand[i]
-      (xe mang đầy hàng từ depot, giao dần, flow giảm dọc tuyến)
+    Ma trận đầu vào: km (float hoặc int đã scale)
     """
     n = len(matrix)
     nodes = list(range(n))
     customers = list(range(1, n))
-    total_demand = sum(demands[i] for i in customers)
 
-    prob = LpProblem("ACVRP_Optimization", LpMinimize)
+    prob = LpProblem("ACVRP_MTZ", LpMinimize)
 
+    # ── Biến nhị phân x[i,j] ──
     valid_edges = [(i, j) for i in nodes for j in nodes if i != j]
+    x = LpVariable.dicts("x", valid_edges, cat=LpBinary)
 
-    x = LpVariable.dicts("x", valid_edges, 0, 1, cat=LpBinary)
-    f = LpVariable.dicts("f", valid_edges, 0, capacity * num_vehicles, cat=LpContinuous)
+    # ── Biến liên tục u[i]: tải trọng tích lũy sau khi phục vụ i ──
+    # Chỉ cần cho customers (không cần cho depot)
+    u = LpVariable.dicts("u", customers, lowBound=0, upBound=capacity, cat=LpContinuous)
 
-    # Hàm mục tiêu: tổng khoảng cách (đơn vị mét)
-    prob += lpSum(matrix[i][j] * x[i, j] for (i, j) in valid_edges), "Total_Distance_m"
+    # ── Hàm mục tiêu ──
+    prob += lpSum(matrix[i][j] * x[i, j] for (i, j) in valid_edges), "Total_Cost"
 
-    # Ràng buộc bậc: mỗi khách hàng vào/ra đúng 1 lần
+    # ── Ràng buộc 1: Mỗi khách hàng được VÀO đúng 1 lần ──
+    for j in customers:
+        prob += lpSum(x[i, j] for i in nodes if i != j) == 1, f"Enter_{j}"
+
+    # ── Ràng buộc 2: Mỗi khách hàng được RA đúng 1 lần ──
     for i in customers:
-        prob += lpSum(x[j, i] for j in nodes if i != j) == 1, f"Enter_{i}"
         prob += lpSum(x[i, j] for j in nodes if i != j) == 1, f"Leave_{i}"
 
-    # Số xe xuất phát ≤ K
-    prob += lpSum(x[0, j] for j in customers) <= num_vehicles, "Max_Vehicles"
+    # ── Ràng buộc 3: Số xe xuất phát và quay về ≤ K ──
+    prob += lpSum(x[0, j] for j in customers) <= num_vehicles, "Depart_Max_K"
+    prob += lpSum(x[i, 0] for i in customers) <= num_vehicles, "Return_Max_K"
 
-    # FIX: Ràng buộc bảo toàn luồng tại depot
-    # Flow xuất depot = total_demand (xe mang đầy hàng ra)
-    prob += lpSum(f[0, j] for j in customers) == total_demand, "Depot_Flow_Out"
-    # Flow nhập depot = total_demand (xe quay về sau khi giao hết)
-    # FIX: Depot_Flow_In phải = total_demand, KHÔNG phải = 0
-    # (Lỗi cũ: == 0 khiến xe không thể quay về depot → infeasible)
-    prob += lpSum(f[j, 0] for j in customers) == total_demand, "Depot_Flow_In"
-
-    # FIX: Bảo toàn luồng qua khách hàng (chiều đúng)
-    # flow_in(i) - flow_out(i) = demand[i]
-    # Giải thích: xe đến i mang flow_in hàng, giao demand[i], rời đi với flow_out = flow_in - demand[i]
+    # ── Ràng buộc 4: MTZ — loại subtour + tải trọng ──
+    # u_i - u_j + Q*x_ij ≤ Q - d_j  ∀i,j ∈ C, i≠j
     for i in customers:
-        flow_in  = lpSum(f[j, i] for j in nodes if i != j)
-        flow_out = lpSum(f[i, j] for j in nodes if i != j)
-        prob += flow_in - flow_out == demands[i], f"FlowConserve_{i}"
+        for j in customers:
+            if i != j:
+                prob += (
+                    u[i] - u[j] + capacity * x[i, j] <= capacity - demands[j],
+                    f"MTZ_{i}_{j}"
+                )
 
-    # Liên kết f và x: f[i,j] > 0 chỉ khi x[i,j] = 1
-    for (i, j) in valid_edges:
-        prob += f[i, j] <= capacity * num_vehicles * x[i, j], f"Link_{i}_{j}"
+    # ── Ràng buộc 5: Giới hạn tải trọng u_i ──
+    # d_i ≤ u_i ≤ Q  ∀i ∈ C
+    for i in customers:
+        prob += u[i] >= demands[i], f"Load_LB_{i}"
+        prob += u[i] <= capacity,   f"Load_UB_{i}"
 
-    # Giải
+    # ── Giải ──
     solver = PULP_CBC_CMD(timeLimit=timelimit, msg=1)
     status = prob.solve(solver)
     status_str = LpStatus[status]
     obj_val = value(prob.objective)
 
-    if status == -1 or obj_val is None:
-        print(f"[MILP] Không tìm thấy nghiệm khả thi. Status: {status_str}")
+    if status not in (1,) and obj_val is None:
+        print(f"[MILP] Không tìm được nghiệm. Status: {status_str}")
         return status_str, None, []
 
-    routes_info = _extract_routes(x, nodes, customers, demands, capacity)
+    routes_info = _extract_routes_mtz(x, nodes, customers, demands, capacity)
     return status_str, obj_val, routes_info
 
 
-def _extract_routes(x, nodes, customers, demands, capacity):
-    """
-    Truy vết các tuyến từ nghiệm x[i,j].
-    Giới hạn max_steps để tránh vòng lặp vô tận khi timelimit khiến nghiệm xấp xỉ.
-    """
+def _extract_routes_mtz(x, nodes, customers, demands, capacity):
+    """Truy vết tuyến đường từ nghiệm x[i,j] của MTZ."""
     routes_info = []
-    visited_nodes = set()
+    visited = set()
     max_steps = len(customers) + 1
 
     for j in customers:
-        val_0j = value(x.get((0, j), 0))
-        if val_0j is None or val_0j <= 0.5:
-            continue
-        if j in visited_nodes:
+        val = value(x.get((0, j), 0)) or 0
+        if val <= 0.5 or j in visited:
             continue
 
         route = [0, j]
-        current_load = demands.get(j, 0)
-        visited_nodes.add(j)
+        load = demands.get(j, 0)
+        visited.add(j)
         curr = j
         steps = 0
 
         while curr != 0 and steps < max_steps:
             steps += 1
             next_node = None
-            best_val = 0.5
-
+            best = 0.5
             for nxt in nodes:
                 if curr == nxt:
                     continue
-                val = value(x.get((curr, nxt), 0))
-                if val is None or val <= best_val:
-                    continue
-                if nxt in visited_nodes and nxt != 0:
-                    print(f"[CẢNH BÁO] Chu trình con tại node {nxt}, cắt ngắn tuyến.")
-                    next_node = 0
-                    best_val = val
-                    break
-                next_node = nxt
-                best_val = val
-
+                v = value(x.get((curr, nxt), 0)) or 0
+                if v > best:
+                    if nxt in visited and nxt != 0:
+                        next_node = 0
+                        break
+                    next_node = nxt
+                    best = v
             if next_node is None:
-                print(f"[CẢNH BÁO] Tuyến đứt tại node {curr}. Thêm depot để đóng.")
                 route.append(0)
                 break
-
             route.append(next_node)
             if next_node != 0:
-                current_load += demands.get(next_node, 0)
-                visited_nodes.add(next_node)
+                load += demands.get(next_node, 0)
+                visited.add(next_node)
             curr = next_node
 
         if route[-1] != 0:
             route.append(0)
 
-        is_valid = current_load <= capacity
-        if not is_valid:
-            print(f"[CẢNH BÁO] Tuyến {route} vi phạm capacity: load={current_load} > {capacity}")
-
-        routes_info.append({
-            'route': route,
-            'load': current_load,
-            'is_valid': is_valid
-        })
+        is_valid = load <= capacity
+        routes_info.append({'route': route, 'load': load, 'is_valid': is_valid})
 
     return routes_info

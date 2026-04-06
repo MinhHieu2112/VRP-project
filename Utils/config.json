@@ -36,15 +36,20 @@
             "decay": 0.8
         },
         "or_tools": {
-            "time_limit_seconds": 180,
-            "first_solution_strategy": "LOCAL_CHEAPEST_INSERTION",
-            "local_search_metaheuristic": "GUIDED_LOCAL_SEARCH",
-            "display_log": true
+            "algorithm": "GUIDED_LOCAL_SEARCH",
+
+            "_comment_first_solution": "Bỏ trống để random hoá mỗi lần chạy. Đặt tên cụ thể (PATH_CHEAPEST_ARC, PARALLEL_CHEAPEST_INSERTION, LOCAL_CHEAPEST_INSERTION, SAVINGS) để cố định.",
+            "first_solution_strategy": "PARALLEL_CHEAPEST_INSERTION",
+
+            "_comment_stopping": "Dừng sau no_improve_iters nghiệm cải thiện. Không dùng time_limit cứng.",
+            "no_improve_iters": 40000,
+            "lns_time_per_step_seconds": 5
         },
         "py_vrp": {
-            "time_limit_seconds": 180,
             "display_log": true,
-            "result_file": "pyvrp_result.txt"
+            "result_file": "pyvrp_result.txt",
+            "_comment_stopping": "Dừng khi không cải thiện sau no_improve_iters vòng liên tiếp.",
+            "no_improve_iters": 40000
         }
     }
 }

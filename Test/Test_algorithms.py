@@ -89,7 +89,7 @@ def validate_routes(routes, matrix):
 # =========================
 # 4. VERIFY DISTANCE
 # =========================
-def verify_optimization(routes, matrix, scaling=1.0, debug_limit=10):
+def verify_optimization(routes, matrix, scaling=1000, debug_limit=10):
     total_distance = 0
 
     print(f"{'Phương tiện':<15} | {'Số điểm':<10} | {'Quãng đường (km)':<15}")
@@ -124,7 +124,7 @@ def main():
                         help="File txt chứa kết quả route để kiểm tra")
     parser.add_argument("--matrix", type=str, required=True,
                         help="File CSV chứa ma trận khoảng cách")
-    parser.add_argument("--scaling", type=float, default=1.0,
+    parser.add_argument("--scaling", type=float, default=1000,
                         help="Scaling factor")
     parser.add_argument("--original", type=float, default=None,
                         help="Giá trị cost gốc để so sánh")
@@ -170,6 +170,6 @@ if __name__ == "__main__":
 
 
 # Sample usage:
-#python test.py \
+# python test.py \
 #  --result ../Results/SA/result_sa.txt \
 #  --matrix ../Data/orsm_matrix.csv

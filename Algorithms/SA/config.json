@@ -21,6 +21,6 @@
         "start_temperature": 5000,
         "end_temperature": 0.1,
         "step": 0.9995,
-        "max_no_improve": 1000
+        "max_no_improve": 5000
     }
 }

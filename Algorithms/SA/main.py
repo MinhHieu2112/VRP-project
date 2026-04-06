@@ -13,7 +13,7 @@ sys.path.append(PROJECT_ROOT)
 from Utils.ResultHandler import ResultHandler
 from Utils.Visualizer import Visualizer
 
-CONFIG_PATH = os.path.join(CURRENT_DIR, "configSA.json")
+CONFIG_PATH = os.path.join(CURRENT_DIR, "config.json")
 
 # Ma trận OSRM: đơn vị mét, số nguyên đã làm tròn
 # Quy đổi sang km CHỈ khi xuất báo cáo (chia 1000)
