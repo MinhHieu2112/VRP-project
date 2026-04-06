@@ -109,7 +109,7 @@ def run_integrated(solver_type):
         total_distance = res.best.distance()
         standardized_result = {
             "solver_name": "PyVRP",
-            "total_distance_km": total_distance / 1000,  # Ma trận đã ở đơn vị m, cần chia 1000 để chuyển thành km
+            "total_distance_km": total_distance / 1000, 
             "execution_time": time.time() - start_time,
             "routes": routes_dict,
             "num_vehicles": len(routes_dict)
@@ -121,7 +121,7 @@ def run_integrated(solver_type):
 
         standardized_result = {
             "solver_name": "OR-Tools",
-            "total_distance_km": dist_km,
+            "total_distance_km": dist_km / 1000, 
             "execution_time": time.time() - start_time,
             "routes": routes,
             "num_vehicles": len(routes)

@@ -3,15 +3,16 @@ import time
 import json
 import os
 import sys
-import math
 import threading
 from alns.stop import MaxIterations
 
+# Ma trận OSRM: đơn vị mét (int, đã làm tròn)
+# Chuyển sang km CHỈ khi xuất báo cáo (chia 1000)
+METERS_TO_KM = 1000
+
 
 class NoImprovementStop:
-    """
-    Dừng khi không cải thiện best solution sau `max_no_improve` vòng liên tiếp.
-    """
+    """Dừng khi không cải thiện best solution sau max_no_improve vòng."""
     def __init__(self, max_no_improve: int):
         self._max_no_improve = max_no_improve
         self._no_improve_count = 0
@@ -27,13 +28,11 @@ class NoImprovementStop:
         return self._no_improve_count >= self._max_no_improve
 
 
-# Import local modules
 from src.utils.loader import load_distance_matrix
 from src.state import CvrpState
 from src.solver import configure_alns
 
-# Import Project Utils
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'  , '..'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 from Utils.ResultHandler import ResultHandler
 from Utils.Visualizer import Visualizer
 
@@ -45,12 +44,8 @@ def load_config(path='config.json'):
 
 def build_initial_solution(clients, cap, matrix, demands, max_v):
     """
-    Tạo nghiệm ban đầu bằng cách nhóm khách theo capacity thực tế,
-    không chia đều theo số xe. Mỗi route được lấp đầy tối đa cap khách
-    trước khi mở route mới — tránh tình trạng 1 khách/xe.
-
-    Nếu tổng số route vượt max_v thì gom thêm vào route cuối
-    (ALNS sẽ xử lý vi phạm capacity sau).
+    Tạo nghiệm ban đầu bằng cách nhóm khách theo capacity thực tế.
+    Mỗi route được lấp đầy tối đa cap trước khi mở route mới.
     """
     routes = []
     current_route = [0]
@@ -70,68 +65,68 @@ def build_initial_solution(clients, cap, matrix, demands, max_v):
         current_route.append(0)
         routes.append(current_route)
 
-    # Nếu vượt max_v, gom các route cuối vào route trước
     while len(routes) > max_v:
         last = routes.pop()
-        routes[-1] = routes[-1][:-1] + last[1:]  # bỏ depot cuối rồi nối
+        routes[-1] = routes[-1][:-1] + last[1:]
 
     return routes
 
 
 def main():
     config = load_config()
+
+    # load_distance_matrix trả về ma trận mét (int)
     matrix = load_distance_matrix(config['data_path'])
     if matrix is None:
         return
 
     num_nodes = matrix.shape[0]
-    scaling = config.get('common_model_parameters', {}).get('scaling_factor', 1.0)
+
+    # FIX: không dùng scaling_factor nữa — ma trận giữ nguyên đơn vị mét
+    # Penalty phải đủ lớn so với chi phí di chuyển (mét)
+    # Ví dụ: penalty_unassigned = 50_000_000 (50_000 km) >> max route cost thực tế
     constraints = config['constraints']
     max_v = constraints['max_vehicles']
     cap   = constraints['vehicle_capacity']
 
-    # Khởi tạo demands
     demands = np.ones(num_nodes) * constraints.get('default_demand', 1)
     demands[0] = 0
 
     clients = list(range(1, num_nodes))
-
-    # ── Tạo nghiệm ban đầu dựa trên capacity, không chia đều theo xe ──
     initial_routes = build_initial_solution(clients, cap, matrix, demands, max_v)
     initial_state  = CvrpState(initial_routes, [], matrix, cap, demands, config)
 
     num_init_vehicles = len(initial_routes)
-    init_dist = sum(initial_state.route_cost(r) for r in initial_routes) / scaling
+    # Báo cáo tiến độ: chia 1000 để hiện km
+    init_dist_m = sum(initial_state.route_cost(r) for r in initial_routes)
     print(f"[*] {num_nodes-1} khách hàng | {num_init_vehicles} xe ban đầu | capacity={cap}")
-    print(f"Quãng đường ban đầu: {init_dist:.2f} km")
+    print(f"[*] Ma trận đơn vị: mét (int). Kết quả báo cáo: km (÷1000)")
+    print(f"Quãng đường ban đầu: {init_dist_m}")
 
-    # 1. Cấu hình ALNS
     alns, accept, select, _ = configure_alns(initial_state, config)
 
-    # 2. Stopping criterion
     p = config['alns_parameters']
     max_no_improve = p.get('max_no_improve', 3000)
     print(f"--- Bắt đầu tối ưu (dừng sau {max_no_improve} vòng không cải thiện) ---")
 
-    # --- Progress logging ---
-    best_so_far      = [init_dist]
-    best_unassigned  = [0]
+    best_so_far     = [init_dist_m]
+    best_unassigned = [0]
     improvement_count = [0]
 
     def on_best(state, rnd):
-        dist = sum(state.route_cost(r) for r in state.routes if len(r) > 2) / scaling
-        best_so_far[0]       = dist
-        best_unassigned[0]   = len(state.unassigned)
+        # Hiển thị km trong log
+        dist_km = sum(state.route_cost(r) for r in state.routes if len(r) > 2)
+        best_so_far[0]        = dist_km
+        best_unassigned[0]    = len(state.unassigned)
         improvement_count[0] += 1
         sys.stdout.write(
-            f"\n  -> [#{improvement_count[0]}] Cải thiện: {dist:.2f} km"
+            f"\n  -> [#{improvement_count[0]}] Cải thiện: {dist_km:.2f} km"
             f" | Unassigned: {len(state.unassigned)}\n"
         )
         sys.stdout.flush()
 
     alns.on_best(on_best)
 
-    # Thread in tiến độ mỗi 10 giây
     stop_flag  = threading.Event()
     start_time = time.time()
 
@@ -160,39 +155,35 @@ def main():
 
     best_state = result.best_state
 
-    # 3. Local Search 2-opt
     print("\n--- Đang làm mịn lộ trình với 2-opt ---")
-    best_state.apply_2opt()
+    best_state.apply_2opt()  # route_loads được sync trong apply_2opt sau khi fix
 
     end_time = time.time()
 
-    # 4. Xuất kết quả
     actual_routes = [r for r in best_state.routes if len(r) > 2]
     routes_dict   = {i: [int(n) for n in r] for i, r in enumerate(actual_routes)}
-    final_dist    = sum(best_state.route_cost(r) for r in actual_routes) / scaling
 
-    # Thống kê phân bố tải trọng
-    loads = []
-    for r in actual_routes:
-        load = sum(demands[n] for n in r if n != 0)
-        loads.append(int(load))
+    # Quy đổi sang km CHỈ ở đây khi tạo báo cáo
+    final_dist_km = sum(best_state.route_cost(r) for r in actual_routes)
+
+    loads    = [int(sum(demands[n] for n in r if n != 0)) for r in actual_routes]
     avg_load = np.mean(loads) if loads else 0
-    avg_pts  = np.mean([len(r)-2 for r in actual_routes]) if actual_routes else 0
+    avg_pts  = np.mean([len(r) - 2 for r in actual_routes]) if actual_routes else 0
 
     standardized_result = {
-        "solver_name":        "ALNS_Full_Optimized",
-        "total_distance_km":  final_dist,
-        "execution_time":     end_time - start_time,
-        "routes":             routes_dict,
-        "num_vehicles":       len(routes_dict),
+        "solver_name":       "ALNS",
+        "total_distance_km": final_dist_km / 1000,
+        "execution_time":    end_time - start_time,
+        "routes":            routes_dict,
+        "num_vehicles":      len(routes_dict),
     }
 
-    output_dir = os.path.join(os.path.dirname(__file__), '..'  , '..', 'Results', 'ALNS')
+    output_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'Results', 'ALNS')
     os.makedirs(output_dir, exist_ok=True)
     ResultHandler.save_to_txt(standardized_result, output_dir)
 
     print(f"\n[HOÀN TẤT]")
-    print(f"Tổng quãng đường: {final_dist:.2f} km")
+    print(f"Tổng quãng đường: {final_dist_km:.2f} km")
     print(f"Số xe sử dụng:    {len(routes_dict)}")
     print(f"Trung bình:       {avg_pts:.1f} điểm/xe | {avg_load:.1f} tải/xe (capacity={cap})")
     print(f"Thời gian:        {end_time - start_time:.2f} giây")

@@ -7,7 +7,6 @@ class ORToolsSolver:
         self.config = config
         # 1. Lấy thông số từ common_model_parameters
         model_params = config.get("common_model_parameters", {})
-        self.scaling_factor = model_params.get("scaling_factor", 100)
         self.depot_id = model_params.get("depot_id", 0)
 
         # 2. Khởi tạo Manager và Routing Model
@@ -19,13 +18,12 @@ class ORToolsSolver:
         self.routing = pywrapcp.RoutingModel(self.manager)
 
     def _distance_callback(self, from_idx, to_idx):
-        """Trả về khoảng cách đã được nhân với scaling_factor (kiểu int)."""
+        """Trả về khoảng cách giữa hai node."""
         from_node = self.manager.IndexToNode(from_idx)
         to_node = self.manager.IndexToNode(to_idx)
         actual_dist = self.data["distance_matrix"][from_node][to_node]
         
-        # Ép kiểu về int là bắt buộc đối với OR-Tools
-        return int(round(actual_dist * self.scaling_factor))
+        return actual_dist
 
     def _demand_callback(self, from_idx):
         """Trả về nhu cầu tải trọng tại node."""
@@ -63,7 +61,7 @@ class ORToolsSolver:
 
             routes[vehicle_count] = route_nodes
 
-        return routes, total_distance / self.scaling_factor
+        return routes, total_distance
 
     def solve(self):
         solver_cfg = self.config.get("solvers", {}).get("or_tools", {})

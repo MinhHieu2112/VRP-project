@@ -17,7 +17,7 @@ print("Starting ACO solver...")
 def load_data(locations_file, matrix_file):
     print(f"Loading data from:\n  {locations_file}\n  {matrix_file}")
     locations_df = pd.read_csv(locations_file)
-    matrix_df = pd.read_csv(matrix_file, header=None)
+    matrix_df    = pd.read_csv(matrix_file, header=None)
 
     nodes = []
     for idx, row in locations_df.iterrows():
@@ -35,24 +35,18 @@ def load_data(locations_file, matrix_file):
 
 
 def parse_routes(best_path: list) -> dict:
-    """
-    Parse flat path [0,1,2,0,3,4,0] thành dict routes.
-    Bỏ qua route rỗng (depot→depot).
-    """
-    routes = {}
-    vehicle_id = 0
+    routes       = {}
+    vehicle_id   = 0
     current_route = [0]
 
     for node in best_path[1:]:
         current_route.append(node)
         if node == 0:
-            # Chỉ lưu nếu route có ít nhất 1 customer
             if len(current_route) > 2:
                 routes[vehicle_id] = current_route[:]
                 vehicle_id += 1
             current_route = [0]
 
-    # Route cuối chưa kết thúc bằng 0
     if len(current_route) > 1:
         current_route.append(0)
         if len(current_route) > 2:
@@ -62,20 +56,30 @@ def parse_routes(best_path: list) -> dict:
 
 
 def run_aco_solver():
-    # Load config
     config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'Utils', 'config.json')
     with open(config_path, 'r') as f:
         config = json.load(f)
 
-    locations_file = os.path.join(os.path.dirname(__file__), '..', '..', config['paths']['locations_data'])
-    matrix_file = os.path.join(os.path.dirname(__file__), '..', '..', config['paths']['distance_matrix'])
-    output_dir = os.path.join(os.path.dirname(__file__), '..', '..', config['paths']['output_dir'])
+    locations_file   = os.path.join(os.path.dirname(__file__), '..', '..', config['paths']['locations_data'])
+    matrix_file      = os.path.join(os.path.dirname(__file__), '..', '..', config['paths']['distance_matrix'])
+    output_dir       = os.path.join(os.path.dirname(__file__), '..', '..', config['paths']['output_dir'])
     vehicle_capacity = config['global_constraints']['vehicle_capacity']
+
+    # Đọc tham số ACO từ config (nếu có) hoặc dùng mặc định
+    aco_cfg          = config.get('solvers', {}).get('aco', {})
+    ants_num         = aco_cfg.get('ants_num', 20)
+    max_iter         = aco_cfg.get('max_iter', 50000)
+    no_improve_limit = aco_cfg.get('no_improve_limit', 1000)
+    alpha            = aco_cfg.get('alpha', 1)
+    beta             = aco_cfg.get('beta', 2)
+    q0               = aco_cfg.get('q0', 0.9)
+
     print(f"Vehicle capacity: {vehicle_capacity}")
+    print(f"ACO params: ants={ants_num}, max_iter={max_iter}, "
+          f"no_improve_limit={no_improve_limit}")
 
     node_num, nodes, node_dist_mat = load_data(locations_file, matrix_file)
 
-    # CVRPGraph tự động validate dữ liệu đầu vào (raise ValueError nếu lỗi)
     print("Creating graph (with validation)...")
     graph = CVRPGraph(
         node_num, nodes, node_dist_mat, vehicle_capacity,
@@ -83,27 +87,28 @@ def run_aco_solver():
         xi=0.01
     )
 
-    print("Running ACO...")
+    print(f"\n--- ACO: dừng sau {no_improve_limit} vòng không cải thiện "
+          f"(tối đa {max_iter} vòng) ---")
+
     start_time = time.time()
     aco = BasicACO(
         graph,
-        ants_num=20,
-        max_iter=100,
-        alpha=1,
-        beta=2,
-        q0=0.9,
-        no_improve_limit=50
+        ants_num=ants_num,
+        max_iter=max_iter,
+        alpha=alpha,
+        beta=beta,
+        q0=q0,
+        no_improve_limit=no_improve_limit,
     )
     best_path, best_distance, best_vehicles = aco.run_basic_aco()
     execution_time = time.time() - start_time
 
-    print(f"\nACO Done: dist={best_distance / 1000:.2f}, vehicles={best_vehicles}, "
-          f"time={execution_time:.2f}s")
+    print(f"\nACO Done: dist={best_distance/1000:.2f}km, "
+          f"vehicles={best_vehicles}, time={execution_time:.2f}s")
 
     routes_dict = parse_routes(best_path)
 
-    # Kiểm tra tất cả customer đã được phục vụ
-    served = set()
+    served      = set()
     for route in routes_dict.values():
         for node in route:
             if node != 0:
@@ -116,11 +121,11 @@ def run_aco_solver():
         print(f"[OK] Tất cả {len(all_customers)} customer đã được phục vụ")
 
     standardized_result = {
-        "solver_name": "ACO",
-        "total_distance_km": best_distance / 1000,  # Ma trận đã ở đơn vị m, cần chia 1000 để chuyển thành km
-        "execution_time": execution_time,
-        "routes": routes_dict,
-        "num_vehicles": best_vehicles
+        "solver_name":       "ACO",
+        "total_distance_km": best_distance / 1000,
+        "execution_time":    execution_time,
+        "routes":            routes_dict,
+        "num_vehicles":      best_vehicles
     }
 
     aco_output_dir = os.path.join(output_dir, 'ACO')
@@ -130,8 +135,8 @@ def run_aco_solver():
     print("--- Visualizing ---")
     try:
         locations_df = pd.read_csv(locations_file)
-        vis_config = config.get('visualization', {})
-        visualizer = Visualizer(
+        vis_config   = config.get('visualization', {})
+        visualizer   = Visualizer(
             locations_df,
             osrm_url=vis_config.get('osrm_url', "http://localhost:5001"),
             use_osrm=vis_config.get('use_osrm', True)

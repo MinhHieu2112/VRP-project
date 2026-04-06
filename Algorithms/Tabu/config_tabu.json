@@ -3,12 +3,15 @@
     "locations_path": "../../Data/locations.csv",
     "tabu_parameters": {
         "tabu_size": 30,
-        "max_iterations": 5000,
-        "max_runtime": 180
+        "max_iterations": 50000,
+        "max_no_improve": 1000
     },
     "constraints": {
         "max_vehicles": 200,
         "vehicle_capacity": 10,
         "penalty_unassigned": 1000000
+    },
+    "common_model_parameters": {
+        "scaling_factor": 1000
     }
 }

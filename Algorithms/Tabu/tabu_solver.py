@@ -1,21 +1,29 @@
 import numpy as np
 import copy
-import time
-from collections import deque  # FIX #3: dùng deque thay list cho O(1) pop
+from collections import deque
 
 
 class TabuSearchSolver:
     def __init__(self, distance_matrix, demands, capacity, max_v,
-                 tabu_size=30, max_iter=10000, max_runtime=180):
-        self.matrix = distance_matrix
-        self.demands = demands
-        self.capacity = capacity
-        self.max_v = max_v
-        self.tabu_size = tabu_size
-        self.max_iter = max_iter
-        self.max_runtime = max_runtime
-        # FIX #3: deque với maxlen tự động loại phần tử cũ nhất → O(1)
-        self.tabu_list = deque(maxlen=tabu_size)
+                 tabu_size=30, max_iter=50000, max_no_improve=1000):
+        """
+        Parameters
+        ----------
+        max_iter       : Số vòng lặp tối đa tuyệt đối (safety cap).
+        max_no_improve : Dừng sớm nếu sau n vòng liên tiếp không cải thiện best.
+        """
+        self.matrix       = distance_matrix
+        self.demands      = demands
+        self.capacity     = capacity
+        self.max_v        = max_v
+        self.tabu_size    = tabu_size
+        self.max_iter     = max_iter
+        self.max_no_improve = max_no_improve
+        self.tabu_list    = deque(maxlen=tabu_size)
+
+    # ------------------------------------------------------------------ #
+    #  Helpers                                                             #
+    # ------------------------------------------------------------------ #
 
     def _route_dist(self, route):
         total = 0.0
@@ -32,9 +40,13 @@ class TabuSearchSolver:
     def _is_feasible(self, route):
         return self._route_demand(route) <= self.capacity
 
+    # ------------------------------------------------------------------ #
+    #  Neighborhood generators                                            #
+    # ------------------------------------------------------------------ #
+
     def _move_relocate(self, state):
         neighbors = []
-        n_routes = len(state)
+        n_routes  = len(state)
 
         for _ in range(30):
             v1 = np.random.randint(0, n_routes)
@@ -42,7 +54,7 @@ class TabuSearchSolver:
             if v1 == v2 or len(state[v1]) <= 3:
                 continue
 
-            p1 = np.random.randint(1, len(state[v1]) - 1)
+            p1       = np.random.randint(1, len(state[v1]) - 1)
             customer = state[v1][p1]
 
             for p2 in range(1, len(state[v2])):
@@ -72,8 +84,7 @@ class TabuSearchSolver:
             new_state[v1][p1], new_state[v2][p2] = new_state[v2][p2], new_state[v1][p1]
 
             if self._is_feasible(new_state[v1]) and self._is_feasible(new_state[v2]):
-                c1 = state[v1][p1]
-                c2 = state[v2][p2]
+                c1, c2   = state[v1][p1], state[v2][p2]
                 move_key = ('swap', min(c1, c2), max(c1, c2))
                 neighbors.append((new_state, move_key))
 
@@ -83,7 +94,7 @@ class TabuSearchSolver:
         neighbors = []
 
         for _ in range(20):
-            v = np.random.randint(0, len(state))
+            v     = np.random.randint(0, len(state))
             route = state[v]
             if len(route) < 5:
                 continue
@@ -91,63 +102,64 @@ class TabuSearchSolver:
             i = np.random.randint(1, len(route) - 2)
             j = np.random.randint(i + 1, len(route) - 1)
 
-            new_state = copy.deepcopy(state)
+            new_state    = copy.deepcopy(state)
             new_state[v][i:j + 1] = new_state[v][i:j + 1][::-1]
-            move_key = ('2opt', v, i, j)
+            move_key     = ('2opt', v, i, j)
             neighbors.append((new_state, move_key))
 
         return neighbors
 
     def _get_neighbors(self, state):
-        neighbors = []
+        neighbors  = []
         neighbors += self._move_relocate(state)
         neighbors += self._move_swap(state)
         neighbors += self._move_2opt_intra(state)
         neighbors.sort(key=lambda x: self._total_dist(x[0]))
         return neighbors
 
+    # ------------------------------------------------------------------ #
+    #  Main solve                                                          #
+    # ------------------------------------------------------------------ #
+
     def solve(self, initial_state):
         best_state = copy.deepcopy(initial_state)
-        best_dist = self._total_dist(best_state)
+        best_dist  = self._total_dist(best_state)
         curr_state = copy.deepcopy(initial_state)
 
-        start_time = time.time()
+        no_improve_count = 0
 
         for iteration in range(self.max_iter):
-            elapsed = time.time() - start_time
-            if elapsed > self.max_runtime:
-                print(f"--- Đã đạt giới hạn thời gian {self.max_runtime}s. "
-                      f"Dừng tại vòng {iteration}. ---")
+
+            # --- Điều kiện dừng no-improvement ---
+            if no_improve_count >= self.max_no_improve:
+                print(f"[Tabu] Dừng sớm tại vòng {iteration}: "
+                      f"{no_improve_count} vòng không cải thiện "
+                      f"(ngưỡng={self.max_no_improve}).")
                 break
 
             neighbors = self._get_neighbors(curr_state)
             if not neighbors:
+                no_improve_count += 1
                 continue
 
-            # FIX #4: Tách biệt rõ ràng aspiration criterion
-            # Bước 1: tìm neighbor tốt nhất không bị tabu
-            # Bước 2: nếu không có, chấp nhận neighbor bị tabu
-            #         nếu nó tốt hơn best_dist (aspiration)
-            best_non_tabu = None
+            best_non_tabu      = None
             best_non_tabu_dist = float('inf')
-            best_aspiration = None
+            best_aspiration    = None
             best_aspiration_dist = float('inf')
 
             for next_state, move_key in neighbors:
                 next_dist = self._total_dist(next_state)
-                in_tabu = move_key in self.tabu_list
+                in_tabu   = move_key in self.tabu_list
 
                 if not in_tabu:
                     if next_dist < best_non_tabu_dist:
                         best_non_tabu_dist = next_dist
-                        best_non_tabu = (next_state, move_key)
+                        best_non_tabu      = (next_state, move_key)
                 else:
-                    # Aspiration criterion: chấp nhận nếu vượt best
                     if next_dist < best_dist and next_dist < best_aspiration_dist:
                         best_aspiration_dist = next_dist
-                        best_aspiration = (next_state, move_key)
+                        best_aspiration      = (next_state, move_key)
 
-            # Chọn move: ưu tiên aspiration nếu tốt hơn non-tabu best
             chosen = None
             if best_aspiration and best_aspiration_dist < best_non_tabu_dist:
                 chosen = best_aspiration
@@ -157,6 +169,7 @@ class TabuSearchSolver:
                 chosen = best_aspiration
 
             if chosen is None:
+                no_improve_count += 1
                 continue
 
             next_state, move_key = chosen
@@ -164,16 +177,20 @@ class TabuSearchSolver:
             curr_state = next_state
 
             if next_dist < best_dist:
-                best_state = copy.deepcopy(next_state)
-                best_dist = next_dist
+                best_state       = copy.deepcopy(next_state)
+                best_dist        = next_dist
+                no_improve_count = 0          # reset vì tìm được best mới
+            else:
+                no_improve_count += 1
 
-            # FIX #3: deque.append() tự động pop phần tử cũ khi đầy
             self.tabu_list.append(move_key)
 
             if iteration % 100 == 0:
-                print(f"  Iter {iteration:5d} | Time: {elapsed:6.1f}s | "
-                      f"Curr: {self._total_dist(curr_state):8.2f} | "
-                      f"Best: {best_dist:8.2f}")
+                print(f"  Iter {iteration:6d} | "
+                      f"Curr={self._total_dist(curr_state):10.0f}m | "
+                      f"Best={best_dist:10.0f}m | "
+                      f"NoImprove={no_improve_count}/{self.max_no_improve}")
 
-        print(f"\n[Tabu Search] Hoàn tất. Best distance = {best_dist:.2f}")
+        print(f"\n[Tabu Search] Hoàn tất. Best distance = {best_dist:.0f}m "
+              f"({best_dist/1000:.2f} km)")
         return best_state, best_dist

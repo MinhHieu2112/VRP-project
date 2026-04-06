@@ -6,7 +6,7 @@
     },
 
     "model_parameters": {
-        "scaling_factor": 100,
+        "num_points": 1600,
         "depot_id": 0
     },
 
