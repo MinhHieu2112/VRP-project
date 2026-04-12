@@ -170,6 +170,6 @@ if __name__ == "__main__":
 
 
 # Sample usage:
-# python test.py \
-#  --result ../Results/SA/result_sa.txt \
+# python Test_algorithms.py \
+#  --result ../Results/SA/result_sa(2).txt \
 #  --matrix ../Data/orsm_matrix.csv

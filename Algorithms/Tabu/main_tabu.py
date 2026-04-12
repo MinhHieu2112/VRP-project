@@ -7,7 +7,7 @@ Algorithms/Tabu/main_tabu.py  — FIX ACVRP
     in cảnh báo nhưng bỏ qua → khách đó không được phục vụ.
   - Vi phạm ràng buộc 1 (mỗi KH thăm đúng 1 lần).
 
-Fix: dùng greedy_init từ init_strategies (NNH đảm bảo cover tất cả KH).
+Fix: dùng random_init từ init_strategies (NNH đảm bảo cover tất cả KH).
 """
 
 import os
@@ -23,8 +23,9 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_DIR))
 sys.path.append(PROJECT_ROOT)
 
 # [FIX-TABU-1] Import init_strategies thay vì dùng init_solution cũ
-from Algorithms.Init_strategies.Init_strategies import greedy_init, _build_demands
+from Algorithms.Init_strategies.Init_strategies import random_init, _build_demands
 from Algorithms.Tabu.tabu_solver import TabuSearchSolver
+from Utils.Data_loader import DataLoader
 from Utils.ResultHandler import ResultHandler
 from Utils.Visualizer import Visualizer
 
@@ -77,10 +78,10 @@ def main():
     max_v       = constraints['max_vehicles']
     demands_map = build_demands(num_nodes, constraints)
 
-    # [FIX-TABU-1] Dùng greedy_init (NNH) thay vì init_solution cũ.
+    # [FIX-TABU-1] Dùng random_init (NNH) thay vì init_solution cũ.
     # NNH đảm bảo TẤT CẢ khách hàng được phục vụ đúng 1 lần.
     print(f"[Tabu] Khởi tạo nghiệm bằng Greedy NNH...")
-    initial_state = greedy_init(
+    initial_state = random_init(
         matrix        = matrix,
         num_nodes     = num_nodes,
         capacity      = cap,

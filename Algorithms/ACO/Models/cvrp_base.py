@@ -156,6 +156,26 @@ class CVRPGraph:
         print(f"[OK] Validation passed: {self.node_num} nodes, "
               f"capacity={self.vehicle_capacity}, ACVRP asymmetric")
 
+    # Trong CVRPGraph.__init__(), sau khi khởi tạo pheromone_mat:
+    # Thêm optional seed
+    def seed_pheromone(self, solution: list[list[int]], seed_weight: float = 2.0):
+        """
+        Reinforce pheromone dọc theo các cạnh của nghiệm seed.
+        seed_weight: bội số so với init_pheromone_val (mặc định 2× = bias nhẹ).
+        
+        [ACVRP] Chỉ cập nhật 1 chiều i→j để giữ tính bất đối xứng.
+        """
+        boost = self.init_pheromone_val * seed_weight
+        for route in solution:
+            for i in range(len(route) - 1):
+                u, v = route[i], route[i + 1]
+                # Chỉ boost nếu hiện tại đang ở init level, không ghi đè
+                # nếu đã có global update chạy trước
+                self.pheromone_mat[u][v] = max(
+                    self.pheromone_mat[u][v],
+                    boost
+                )
+
     # ──────────────────────────────────────────────────────────────────
     # Pheromone Updates — BẤT ĐỐI XỨNG (ACVRP)
     # ──────────────────────────────────────────────────────────────────

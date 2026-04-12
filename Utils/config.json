@@ -31,7 +31,7 @@
             "max_runtime": 180,
             "start_temperature": 1000,
             "end_temperature": 1,
-            "step": 0.9997,
+            "step": 0.9999,
             "scores": [10, 5, 2, 0],
             "decay": 0.8
         },
@@ -50,6 +50,16 @@
             "result_file": "pyvrp_result.txt",
             "_comment_stopping": "Dừng khi không cải thiện sau no_improve_iters vòng liên tiếp.",
             "no_improve_iters": 40000
+        },
+        "aco": {
+        "ants_num": 20,
+        "max_iter": 1000,
+        "no_improve_limit": 100,
+        "alpha": 1.0,
+        "beta": 2.0,
+        "q0": 0.9,
+        "rho": 0.1,
+        "xi": 0.01
         }
     }
 }

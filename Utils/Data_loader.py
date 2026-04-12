@@ -29,8 +29,8 @@ class DataLoader:
         df_matrix = pd.read_csv(self.matrix_path, header=None)
         matrix_float = np.nan_to_num(df_matrix.values.astype(float), nan=0.0)
 
-        # Ma trận đã được làm sạch, giữ nguyên giá trị gốc (đơn vị: km)
-        matrix_int = np.round(matrix_float).astype(np.int64)
+        # Ma trận đã được làm sạch, giữ nguyên giá trị gốc
+        matrix_int = np.round(matrix_float/10.0).astype(np.int64)
         matrix_int[matrix_int < 0] = 0
 
         # 3. Đọc file tọa độ khách hàng

@@ -1,0 +1,41 @@
+{
+  "paths": {
+    "distance_matrix": "../../Data/orsm_matrix.csv",
+    "locations": "../../Data/locations.csv",
+    "output_dir": "../../Results"
+  },
+  "global_constraints": {
+    "max_vehicles": 200,
+    "vehicle_capacity": 10,
+    "default_demand": 1
+  },
+  "solvers": {
+    "aco": {
+      "ants_num": 20,
+      "max_iter": 1000,
+      "no_improve_limit": 100,
+      "alpha": 1.0,
+      "beta": 2.0,
+      "q0": 0.9,
+      "rho": 0.1,
+      "xi": 0.01
+    },
+    "sa": {
+      "start_temperature": 5000,
+      "end_temperature": 0.1,
+      "cooling_rate": 0.9995,
+      "max_no_improve": 1000,
+      "iter_per_temp": 500
+    },
+    "alns": {
+      "max_iterations": 2000,
+      "weight_update_step": 100,
+      "reaction_factor": 0.1
+    }
+  },
+  "visualization": {
+    "osrm_url": "http://localhost:5001",
+    "use_osrm": true,
+    "map_filename": "route_map.html"
+  }
+}

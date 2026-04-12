@@ -1,32 +1,4 @@
-"""
-Algorithms/SA/solver_sa.py  — FIX ACVRP
-=========================================
-Sửa 2 lỗi vi phạm ràng buộc ACVRP:
 
-[FIX-SA-1] RELOCATE capacity check sai logic:
-  Lỗi cũ:
-    if len(r2) <= 2 AND self.get_route_load(r2) + self.demand > self.capacity:
-        continue
-    ...
-    if self.get_route_load(r2) + self.demand <= self.capacity:  ← kiểm tra lại!
-        node = r1.pop(i); r2.insert(j, node)
-
-  Vấn đề: điều kiện `if len(r2) <= 2 AND ...` chỉ skip khi r2 rỗng VÀ quá tải.
-  Khi r2 không rỗng nhưng đầy tải, code vẫn đi tiếp vào khối `if ... <= capacity`
-  và THỰC HIỆN MOVE đúng. Nhưng khi r2 rỗng và vừa tải thì code bỏ qua check
-  thứ 2 và cũng thực hiện move. Tuy nhiên bản gốc bỏ `accepted_move = True`
-  ở bên ngoài khối if, nên nếu capacity check thứ 2 fail thì move không được
-  đánh dấu là accepted → không rollback → route bị corrupt (node đã pop khỏi r1
-  nhưng không được insert vào r2).
-
-[FIX-SA-2] get_route_load dùng len(route)-2:
-  Đúng khi demand=1 cho mọi node, nhưng không tổng quát.
-  Fix: dùng demands_map dict để tính đúng.
-
-[FIX-SA-3] 2-opt rollback dùng reversed() trả iterator:
-  Slice assignment cần list, không phải iterator.
-  Fix: list(reversed(...)).
-"""
 
 import random
 import math
@@ -34,7 +6,7 @@ import sys
 import os
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
-from Algorithms.Init_strategies.Init_strategies import greedy_init, _build_demands
+from Algorithms.Init_strategies.Init_strategies import random_init, _build_demands
 
 
 class SimulatedAnnealingSolver:
@@ -50,7 +22,7 @@ class SimulatedAnnealingSolver:
         sa_cfg              = config.get('alns_parameters', {})
         self.T_start        = sa_cfg.get('start_temperature', 5000)
         self.T_min          = sa_cfg.get('end_temperature', 0.1)
-        self.alpha          = sa_cfg.get('step', 0.9995)
+        self.alpha          = sa_cfg.get('step', 0.9999)
         self.max_no_improve = sa_cfg.get('max_no_improve', 1000)
 
         self.iter_per_T    = 500
@@ -86,12 +58,12 @@ class SimulatedAnnealingSolver:
                 + len(solution) * self.vehicle_penalty)
 
     # ──────────────────────────────────────────────────────────────────
-    # Khởi tạo nghiệm (dùng greedy_init từ init_strategies)
+    # Khởi tạo nghiệm (dùng random_init từ init_strategies)
     # ──────────────────────────────────────────────────────────────────
 
     def initial_solution(self) -> list:
         """Tạo nghiệm ban đầu bằng Greedy Nearest Neighbor (NNH)."""
-        return greedy_init(
+        return random_init(
             matrix        = self.dist,
             num_nodes     = self.n,
             capacity      = self.capacity,

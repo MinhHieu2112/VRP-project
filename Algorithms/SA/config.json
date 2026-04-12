@@ -20,7 +20,7 @@
     "alns_parameters": {
         "start_temperature": 5000,
         "end_temperature": 0.1,
-        "step": 0.9995,
-        "max_no_improve": 5000
+        "step": 0.9999,
+        "max_no_improve": 50000
     }
 }
