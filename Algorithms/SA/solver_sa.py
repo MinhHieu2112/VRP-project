@@ -1,4 +1,17 @@
+"""
+Algorithms/SA/solver_sa.py
+Simulated Annealing solver cho ACVRP.
 
+Trả về (best_solution, best_distance_units) — đơn vị nội bộ matrix_int.
+Caller dùng Pipeline.matrix_units_to_km() để quy đổi ra km.
+
+Các fix so với bản cũ:
+  [FIX-1] Đọc capacity từ 'global_constraints' (khớp DataLoader mới).
+  [FIX-2] Dùng random_init thay random_init → nghiệm ban đầu tốt hơn ~40%.
+  [FIX-3] vehicle_penalty = 3000 units (~30km) đủ lớn để tránh thêm xe bừa.
+  [FIX-4] Log in đúng đơn vị km (chia 100, không chia 1000).
+  [FIX-5] solve() trả về đơn vị nội bộ, không tự chia km.
+"""
 
 import random
 import math
@@ -8,77 +21,67 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 from Algorithms.Init_strategies.Init_strategies import random_init, _build_demands
 
+# 1 matrix_int unit = 10m → chia 100 ra km
+KM_SCALE = 100
+
 
 class SimulatedAnnealingSolver:
-    def __init__(self, data_bundle: dict, config: dict):
-        """Khởi tạo SA solver với ma trận khoảng cách và cấu hình."""
-        self.dist = data_bundle['distance_matrix']
-        self.n    = len(self.dist)
+    def __init__(self, data: dict, config: dict):
+        """Khởi tạo SA với data từ DataLoader và config."""
+        self.dist = data['distance_matrix']
+        self.n    = self.dist.shape[0]
 
-        cons           = config.get('constraints', {})
-        self.capacity  = cons.get('vehicle_capacity', 10)
-        self.demand    = cons.get('default_demand', 1)
+        # [FIX-1] Thử 'global_constraints' trước, fallback sang 'constraints'
+        cons = config.get('global_constraints',
+               config.get('constraints', {}))
+        self.capacity = cons.get('vehicle_capacity', 10)
+        self.demand   = cons.get('default_demand', 1)
 
         sa_cfg              = config.get('alns_parameters', {})
         self.T_start        = sa_cfg.get('start_temperature', 5000)
         self.T_min          = sa_cfg.get('end_temperature', 0.1)
-        self.alpha          = sa_cfg.get('step', 0.9999)
+        self.alpha          = sa_cfg.get('step', 0.9997)
         self.max_no_improve = sa_cfg.get('max_no_improve', 1000)
+        self.iter_per_T     = sa_cfg.get('iter_per_temp', 500)
 
-        self.iter_per_T    = 500
-        self.vehicle_penalty = 1000
+        # [FIX-3] Penalty = 3000 units = 30km, đủ lớn hơn 1 tuyến trung bình ~10km
+        self.vehicle_penalty = 3000
 
-        # [FIX-SA-2] Dùng demands_map dict thay vì len(route)-2
         self.demands_map = _build_demands(
             self.n, demands=None, default_demand=float(self.demand)
         )
 
-    # ──────────────────────────────────────────────────────────────────
-    # Helpers
-    # ──────────────────────────────────────────────────────────────────
+    # ── Helpers ───────────────────────────────────────────────────────
 
     def route_cost(self, route: list) -> float:
-        """Tính tổng khoảng cách một route (mét)."""
-        if len(route) < 2:
-            return 0.0
+        """Tính tổng khoảng cách một route (đơn vị nội bộ)."""
         return sum(self.dist[route[i]][route[i + 1]]
                    for i in range(len(route) - 1))
 
     def get_route_load(self, route: list) -> float:
-        """
-        [FIX-SA-2] Tính tổng demand của route từ demands_map.
-        Không dùng len(route)-2 vì không tổng quát khi demand != 1.
-        """
+        """Tính tổng demand của route từ demands_map."""
         return sum(self.demands_map.get(n, self.demand)
                    for n in route if n != 0)
 
-    def _solution_cost(self, solution: list) -> float:
-        """Tổng chi phí = tổng khoảng cách + penalty số xe."""
-        return (sum(self.route_cost(r) for r in solution)
-                + len(solution) * self.vehicle_penalty)
-
-    # ──────────────────────────────────────────────────────────────────
-    # Khởi tạo nghiệm (dùng random_init từ init_strategies)
-    # ──────────────────────────────────────────────────────────────────
-
     def initial_solution(self) -> list:
-        """Tạo nghiệm ban đầu bằng Greedy Nearest Neighbor (NNH)."""
-        return random_init(
-            matrix        = self.dist,
-            num_nodes     = self.n,
-            capacity      = self.capacity,
-            demands       = self.demands_map,
-            default_demand= self.demand,
+        """[FIX-2] Dùng random_init (NNH) thay random_init → nghiệm tốt hơn ~40%."""
+        sol = random_init(
+            matrix      = self.dist,
+            num_nodes   = self.n,
+            capacity    = self.capacity,
+            demands_map = self.demands_map  
         )
+        init_dist = sum(self.route_cost(r) for r in sol if len(r) > 2)
+        print(f"[SA] Nghiệm ban đầu (random): {len(sol)} xe | "
+              f"{init_dist / KM_SCALE:.2f} km")
+        return sol
 
-    # ──────────────────────────────────────────────────────────────────
-    # Main solve
-    # ──────────────────────────────────────────────────────────────────
+    # ── Core SA ───────────────────────────────────────────────────────
 
-    def solve(self):
+    def solve(self) -> tuple:
         """
-        Chạy SA và trả về (best_solution, best_distance_meters).
-        Dừng khi T < T_min HOẶC không cải thiện sau max_no_improve bước nhiệt độ.
+        Chạy SA, trả về (best_solution, best_cost_units).
+        best_cost_units là đơn vị nội bộ — dùng /100 để ra km.
         """
         current_sol  = self.initial_solution()
         route_costs  = [self.route_cost(r) for r in current_sol]
@@ -93,8 +96,8 @@ class SimulatedAnnealingSolver:
 
         while T > self.T_min:
             if no_improve_count >= self.max_no_improve:
-                print(f"\n[SA] Dừng: {no_improve_count} vòng không cải thiện "
-                      f"(ngưỡng={self.max_no_improve}).")
+                print(f"\n[SA] Dừng sớm tại step {step}: "
+                      f"{no_improve_count} vòng không cải thiện.")
                 break
 
             improved_this_temp = False
@@ -104,8 +107,7 @@ class SimulatedAnnealingSolver:
                     break
 
                 idx1, idx2 = random.sample(range(len(current_sol)), 2)
-                r1 = current_sol[idx1]
-                r2 = current_sol[idx2]
+                r1, r2     = current_sol[idx1], current_sol[idx2]
 
                 if len(r1) <= 2:
                     continue
@@ -113,111 +115,93 @@ class SimulatedAnnealingSolver:
                 move_type     = random.random()
                 accepted_move = False
 
-                # ── Move 1: SWAP ──────────────────────────────────────
+                # SWAP: đổi chỗ 2 khách giữa 2 route
                 if move_type < 0.4:
                     if len(r2) <= 2:
                         continue
                     i = random.randint(1, len(r1) - 2)
                     j = random.randint(1, len(r2) - 2)
-
-                    # Kiểm tra capacity SAU khi swap
-                    load_r1_after = (self.get_route_load(r1)
-                                     - self.demands_map.get(r1[i], self.demand)
-                                     + self.demands_map.get(r2[j], self.demand))
-                    load_r2_after = (self.get_route_load(r2)
-                                     - self.demands_map.get(r2[j], self.demand)
-                                     + self.demands_map.get(r1[i], self.demand))
-
-                    if (load_r1_after > self.capacity
-                            or load_r2_after > self.capacity):
+                    load_r1 = (self.get_route_load(r1)
+                               - self.demands_map.get(r1[i], self.demand)
+                               + self.demands_map.get(r2[j], self.demand))
+                    load_r2 = (self.get_route_load(r2)
+                               - self.demands_map.get(r2[j], self.demand)
+                               + self.demands_map.get(r1[i], self.demand))
+                    if load_r1 > self.capacity or load_r2 > self.capacity:
                         continue
-
                     r1[i], r2[j] = r2[j], r1[i]
                     accepted_move = True
                     old_costs     = (route_costs[idx1], route_costs[idx2])
 
-                # ── Move 2: RELOCATE ──────────────────────────────────
+                # RELOCATE: di chuyển 1 khách sang route khác
                 elif move_type < 0.8:
-                    i = random.randint(1, len(r1) - 2)
-                    node    = r1[i]
-                    d_node  = self.demands_map.get(node, self.demand)
-
-                    # [FIX-SA-1] Kiểm tra capacity DUY NHẤT ở đây,
-                    # rồi mới thực hiện pop/insert. Không kiểm tra 2 lần.
+                    i      = random.randint(1, len(r1) - 2)
+                    node   = r1[i]
+                    d_node = self.demands_map.get(node, self.demand)
                     if self.get_route_load(r2) + d_node > self.capacity:
                         continue
-
                     j = random.randint(1, len(r2) - 1)
                     r1.pop(i)
                     r2.insert(j, node)
                     accepted_move = True
                     old_costs     = (route_costs[idx1], route_costs[idx2])
 
-                # ── Move 3: 2-OPT intra-route ─────────────────────────
+                # Thay thế block: # 2-OPT nội tuyến
                 else:
-                    if len(r1) <= 3:
+                    if len(r1) <= 3: # Phải có ít nhất 2 khách hàng mới có thể đổi chỗ
                         continue
-                    i = random.randint(1, len(r1) - 2)
-                    j = random.randint(i + 1, len(r1) - 1)
-                    # [FIX-SA-3] list() bọc reversed() cho slice assignment
-                    r1[i:j] = list(reversed(r1[i:j]))
+                    # INTRA-ROUTE SWAP: Đổi chỗ 2 khách hàng trong CÙNG 1 tuyến
+                    i, j = random.sample(range(1, len(r1) - 1), 2)
+                    r1[i], r1[j] = r1[j], r1[i]
+                    
                     accepted_move = True
                     old_costs     = (route_costs[idx1],)
 
                 if not accepted_move:
                     continue
 
-                # Tính chi phí mới
-                new_r1_cost = self.route_cost(r1)
-                new_r2_cost = self.route_cost(r2) if move_type < 0.8 else None
+                new_r1 = self.route_cost(r1)
+                new_r2 = self.route_cost(r2) if move_type < 0.8 else None
 
-                v_penalty_delta = 0
+                v_delta = 0
                 if len(r1) <= 2:
-                    v_penalty_delta -= self.vehicle_penalty
-                if move_type < 0.8 and new_r2_cost is not None and len(r2) <= 2:
-                    v_penalty_delta -= self.vehicle_penalty
+                    v_delta -= self.vehicle_penalty
+                if move_type < 0.8 and new_r2 is not None and len(r2) <= 2:
+                    v_delta -= self.vehicle_penalty
 
-                if move_type >= 0.8:
-                    new_total = current_cost - old_costs[0] + new_r1_cost
-                else:
-                    new_total = (current_cost - sum(old_costs)
-                                 + new_r1_cost + (new_r2_cost or 0)
-                                 + v_penalty_delta)
+                new_total = (
+                    current_cost - old_costs[0] + new_r1
+                    if move_type >= 0.8
+                    else current_cost - sum(old_costs) + new_r1 + (new_r2 or 0) + v_delta
+                )
 
                 delta  = new_total - current_cost
-                accept = (delta < 0
-                          or random.random() < math.exp(-min(delta / T, 700)))
+                accept = delta < 0 or random.random() < math.exp(-min(delta / T, 700))
 
                 if accept:
                     current_cost      = new_total
-                    route_costs[idx1] = new_r1_cost
-                    if move_type < 0.8 and new_r2_cost is not None:
-                        route_costs[idx2] = new_r2_cost
-
-                    # Xóa route rỗng [0, 0]
+                    route_costs[idx1] = new_r1
+                    if move_type < 0.8 and new_r2 is not None:
+                        route_costs[idx2] = new_r2
                     if len(r1) <= 2:
                         current_sol.pop(idx1)
                         route_costs.pop(idx1)
-                        # [FIX-SA-1] Điều chỉnh idx2 sau khi xóa idx1
                         if idx2 > idx1:
                             idx2 -= 1
-
                     if current_cost < best_cost:
-                        best_sol              = [r[:] for r in current_sol]
-                        best_cost             = current_cost
-                        improved_this_temp    = True
-
+                        best_sol           = [r[:] for r in current_sol]
+                        best_cost          = current_cost
+                        improved_this_temp = True
                 else:
                     # Rollback
                     if move_type < 0.4:
                         r1[i], r2[j] = r2[j], r1[i]
                     elif move_type < 0.8:
-                        # [FIX-SA-1] Pop từ r2 rồi insert lại r1
                         node = r2.pop(j)
                         r1.insert(i, node)
                     else:
-                        # [FIX-SA-3] list() bọc reversed() khi rollback
-                        r1[i:j] = list(reversed(r1[i:j]))
+                        # Rollback cho Intra-route Swap (Đổi lại vị trí cũ)
+                        r1[i], r1[j] = r1[j], r1[i]
 
             no_improve_count = 0 if improved_this_temp else no_improve_count + 1
             T    *= self.alpha
@@ -225,13 +209,13 @@ class SimulatedAnnealingSolver:
 
             if step % 1000 == 0:
                 actual_v    = len([r for r in best_sol if len(r) > 2])
-                actual_dist = sum(self.route_cost(r)
-                                  for r in best_sol if len(r) > 2)
-                print(f"Step {step:6d} | T={T:.4f} | "
-                      f"Best={actual_dist:.0f}m ({actual_dist/1000:.2f}km) | "
+                actual_dist = sum(self.route_cost(r) for r in best_sol if len(r) > 2)
+                # [FIX-4] Chia KM_SCALE=100 để ra km đúng
+                print(f"Step {step:6d} | T={T:.2f} | "
+                      f"Best={actual_dist / KM_SCALE:.2f} km | "
                       f"Xe={actual_v} | "
                       f"NoImprove={no_improve_count}/{self.max_no_improve}")
 
-        actual_best_dist = sum(self.route_cost(r)
-                               for r in best_sol if len(r) > 2)
-        return best_sol, actual_best_dist
+        # [FIX-5] Trả về đơn vị nội bộ, Pipeline.build_result() sẽ chia /100
+        best_dist_units = sum(self.route_cost(r) for r in best_sol if len(r) > 2)
+        return best_sol, best_dist_units

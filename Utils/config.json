@@ -37,13 +37,11 @@
         },
         "or_tools": {
             "algorithm": "GUIDED_LOCAL_SEARCH",
-
-            "_comment_first_solution": "Bỏ trống để random hoá mỗi lần chạy. Đặt tên cụ thể (PATH_CHEAPEST_ARC, PARALLEL_CHEAPEST_INSERTION, LOCAL_CHEAPEST_INSERTION, SAVINGS) để cố định.",
-            "first_solution_strategy": "PARALLEL_CHEAPEST_INSERTION",
-
-            "_comment_stopping": "Dừng sau no_improve_iters nghiệm cải thiện. Không dùng time_limit cứng.",
-            "no_improve_iters": 40000,
-            "lns_time_per_step_seconds": 5
+            "first_solution_strategy": "PATH_CHEAPEST_ARC",
+            "no_improve_iters": 100,
+            "time_limit": 200,
+            "lns_time_per_step_seconds": 5,
+            "log_search": false
         },
         "py_vrp": {
             "display_log": true,
@@ -54,7 +52,7 @@
         "aco": {
         "ants_num": 20,
         "max_iter": 1000,
-        "no_improve_limit": 100,
+        "no_improve_limit": 500,
         "alpha": 1.0,
         "beta": 2.0,
         "q0": 0.9,
