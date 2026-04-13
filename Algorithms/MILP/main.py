@@ -23,7 +23,6 @@ def load_config() -> dict:
     with open(path, 'r', encoding='utf-8') as f:
         return json.load(f)
 
-
 def compute_upper_bound(matrix, demands_dict: dict,
                          capacity: int, max_vehicles: int) -> float:
     num_nodes = matrix.shape[0]
@@ -103,4 +102,4 @@ def main(limit_nodes):
 
 
 if __name__ == "__main__":
-    main(limit_nodes=1600)
+    main(limit_nodes=100)
