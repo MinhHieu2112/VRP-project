@@ -13,7 +13,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_DIR))
 sys.path.append(PROJECT_ROOT)
 
 from milp_solvers import solve_acvrp_milp
-from Algorithms.Init_strategies.Init_strategies import greedy_init
+from Algorithms.Init_strategies.Init_strategies import init_solution
 from Utils.Pipeline import load_data, build_result, save_result, visualize, KM_SCALE
 
 
@@ -26,11 +26,17 @@ def load_config() -> dict:
 
 def compute_upper_bound(matrix, demands_dict: dict,
                          capacity: int, max_vehicles: int) -> float:
-    """Tính upper bound bằng NNH để ước lượng nghiệm ban đầu."""
     num_nodes = matrix.shape[0]
-    solution  = greedy_init(matrix, num_nodes, capacity,
-                             demands=demands_dict, max_vehicles=max_vehicles)
-    ub_units  = sum(
+    solution  = init_solution(          # ← dùng factory function
+        strategy      = "greedy",
+        matrix        = matrix,
+        num_nodes     = num_nodes,
+        capacity      = capacity,
+        demands       = demands_dict,   # ← đúng: init_solution nhận 'demands'
+        max_vehicles  = max_vehicles,
+        validate      = False,
+    )
+    ub_units = sum(
         sum(matrix[r[i], r[i+1]] for i in range(len(r)-1))
         for r in solution
     )
@@ -50,7 +56,7 @@ def format_routes(routes_info: list) -> dict:
     return routes
 
 
-def main(limit_nodes: int = 50):
+def main(limit_nodes):
     """Chạy toàn bộ pipeline MILP: load → ub → solve → save → visualize."""
     config = load_config()
     data   = load_data(config)
@@ -97,4 +103,4 @@ def main(limit_nodes: int = 50):
 
 
 if __name__ == "__main__":
-    main(limit_nodes=50)
+    main(limit_nodes=1600)
