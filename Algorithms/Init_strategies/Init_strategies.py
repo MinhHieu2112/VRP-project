@@ -238,35 +238,48 @@ def clarke_wright_init(matrix: np.ndarray,
                         demands_map: Dict[int, float],
                         max_vehicles: int = 200) -> Solution:
     """
-    Khởi tạo CLARKE-WRIGHT SAVINGS — vectorized savings computation.
+    Khởi tạo CLARKE-WRIGHT SAVINGS cho ACVRP (bất đối xứng).
 
-    Tính savings s(i,j) = d(0,i) + d(j,0) - d(i,j) cho mọi cặp (i,j).
-    Sắp xếp giảm dần. Gộp route nếu:
-      - i là node CUỐI route A, j là node ĐẦU route B
-      - Tổng load sau gộp ≤ capacity
+    Tính savings s(i,j) = d(0,i) + d(j,0) - d(i,j) cho mọi cặp có hướng (i→j).
+    Với ACVRP: s(i,j) ≠ s(j,i) vì d(i,j) ≠ d(j,i) và d(0,i) ≠ d(0,j).
 
-    Dùng cho: ALNS (nghiệm khởi tạo tốt), MILP (upper bound chặt).
+    [FIX-ACVRP] Phiên bản cũ dùng `if i >= j: continue` → chỉ tính upper triangle,
+    bỏ qua chiều ngược j→i. Điều này đúng với CVRP đối xứng nhưng SAI với ACVRP:
+      - s(i,j) = d(0,i) + d(j,0) - d(i,j)   ← tiết kiệm khi gộp: ...-i-j-...
+      - s(j,i) = d(0,j) + d(i,0) - d(j,i)   ← tiết kiệm khi gộp: ...-j-i-...
+    Hai giá trị này khác nhau do tính bất đối xứng của OSRM.
+
+    Fix: bỏ điều kiện `i >= j`, tính đủ n*(n-1) cặp có hướng.
+    Merger rule vẫn như cũ: i phải là cuối route A, j phải là đầu route B,
+    tức là gộp [0,...,i,0] + [0,j,...,0] → [0,...,i,j,...,0].
+
     Độ phức tạp: O(n² log n) cho sorting savings.
     """
     customers  = list(range(1, num_nodes))
-    depot_dist = matrix[0].astype(np.float64)   # d(depot → i)
-    back_dist  = matrix[:, 0].astype(np.float64) # d(i → depot)
+    depot_dist = matrix[0].astype(np.float64)    # d(depot → i) = d(0, i)
+    back_dist  = matrix[:, 0].astype(np.float64) # d(i → depot) = d(i, 0)
 
     # Mỗi khách khởi đầu là 1 route độc lập [0, i, 0]
     routes:        Dict[int, Route] = {i: [0, i, 0] for i in customers}
     loads:         Dict[int, float] = {i: float(demands_map[i]) for i in customers}
     node_to_route: Dict[int, int]   = {i: i for i in customers}
 
-    # Tính savings vectorized: s(i,j) = d(0,i) + d(j,0) - d(i,j)
-    # Chỉ tính upper triangle (i < j)
+    # [FIX-ACVRP] Tính savings theo ĐỦ hai chiều: n*(n-1) cặp có hướng
+    # s(i,j) = d(0,i) + d(j,0) - d(i,j)
+    # Ý nghĩa: nếu gộp route kết thúc bằng i với route bắt đầu bằng j,
+    # tiết kiệm được đoạn "về depot từ i" + "xuất phát depot đến j",
+    # thay bằng đoạn "đi thẳng i→j".
+    #
+    # Cũ (CVRP): if i >= j: continue  → chỉ n*(n-1)/2 cặp, bỏ chiều j→i
+    # Mới (ACVRP): không có điều kiện lọc → đủ n*(n-1) cặp có hướng
     savings: List[Tuple[float, int, int]] = []
     for i in customers:
         for j in customers:
-            if i >= j:
-                continue
-            s = (float(depot_dist[i])
-                 + float(back_dist[j])
-                 - float(matrix[i, j]))
+            if i == j:
+                continue  # chỉ bỏ cặp (i,i), GIỮ cả (i,j) lẫn (j,i)
+            s = (float(depot_dist[i])   # d(0 → i): chi phí nếu i là cuối route
+                 + float(back_dist[j])  # d(j → 0): chi phí nếu j là đầu route
+                 - float(matrix[i, j])) # d(i → j): chi phí nối trực tiếp
             if s > 0:
                 savings.append((s, i, j))
 
@@ -281,13 +294,16 @@ def clarke_wright_init(matrix: np.ndarray,
         route_i = routes[ri]
         route_j = routes[rj]
 
-        # i phải là cuối route_i (trước depot), j phải là đầu route_j (sau depot)
+        # Merger rule (không đổi):
+        # i phải là node CUỐI route_i (vị trí [-2], trước depot kết thúc)
+        # j phải là node ĐẦU route_j (vị trí [1], sau depot xuất phát)
+        # → Gộp: [0,...,i,0] + [0,j,...,0] → [0,...,i,j,...,0]
         if route_i[-2] != i or route_j[1] != j:
             continue
         if loads[ri] + loads[rj] > capacity:
             continue
 
-        # Hợp nhất: [0,...,i,0] + [0,j,...,0] → [0,...,i,j,...,0]
+        # Hợp nhất: cắt depot cuối route_i, cắt depot đầu route_j
         merged     = route_i[:-1] + route_j[1:]
         routes[ri] = merged
         loads[ri] += loads[rj]
