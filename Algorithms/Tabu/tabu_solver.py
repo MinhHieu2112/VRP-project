@@ -461,25 +461,25 @@ class GranularTabuSearch:
     # PERTURBATION — DOUBLE BRIDGE (IMP-6)
     # ─────────────────────────────────────────────────────────────────
 
-    def _double_bridge(self, sol: Solution) -> Solution:
+    def _double_bridge(self, sol: Solution, num_routes_to_shake=15) -> Solution:
         """
         [IMP-6] Double-bridge perturbation để thoát local optima.
         Chọn 4 cạnh ngẫu nhiên trên một flat-path và ghép lại theo
         kiểu 4-opt double bridge (không thể đảo ngược bởi 2-opt/3-opt).
         """
-        # Flatten thành 1 chuỗi khách hàng (bỏ depot)
+        new_sol = self._copy_sol(sol)
+        if len(new_sol) < num_routes_to_shake:
+            return self._double_bridge(sol) # Fallback nếu quá ít xe
+            
+        # Chọn ngẫu nhiên k xe
+        idx_to_shake = random.sample(range(len(new_sol)), num_routes_to_shake)
         flat = []
-        for r in sol:
-            customers_in_r = [n for n in r if n != 0]
-            if customers_in_r:
-                flat.extend(customers_in_r)
-
-        n = len(flat)
-        if n < 8:
-            return self._copy_sol(sol)
+        for idx in sorted(idx_to_shake, reverse=True):
+            route = new_sol.pop(idx)
+            flat.extend([n for n in route if n != 0])
 
         # Chọn 4 điểm cắt ngẫu nhiên
-        positions = sorted(random.sample(range(1, n), 4))
+        positions = sorted(random.sample(range(1, len(flat)), 4))
         a, b, c, d = positions
 
         seg0 = flat[:a]
@@ -490,8 +490,9 @@ class GranularTabuSearch:
         # Ghép lại theo thứ tự double-bridge: 0-2-1-3
         new_flat = seg0 + seg2 + seg1 + seg3
 
-        # Xây lại solution từ flat theo capacity
-        new_sol = self._rebuild_from_flat(new_flat)
+        # Rebuild chỉ các xe này và nối lại vào solution chính
+        shaken_routes = self._rebuild_from_flat(new_flat)
+        new_sol.extend(shaken_routes)
         return new_sol
 
     def _rebuild_from_flat(self, flat: List[int]) -> Solution:
@@ -601,13 +602,21 @@ class GranularTabuSearch:
             if no_improve_count == self.max_no_improve // 2:
                 perturbed = self._double_bridge(curr_sol)
                 p_cost    = self._total_cost(perturbed)
-                if p_cost < best_dist * 1.05:  # chấp nhận nếu không quá tệ
+                
+                # Nếu cú nhảy này tìm được kỷ lục mới, phải ghi nhận ngay!
+                if p_cost < best_dist:
+                    best_dist = p_cost
+                    best_sol  = self._copy_sol(perturbed)
+                    no_improve_count = 0 
+                    print(f"  [GTS] Perturbation found NEW BEST: {best_dist/100:.2f} km")
+                
+                # Chấp nhận nghiệm này để tiếp tục tìm kiếm vùng không gian mới
+                if p_cost < best_dist * 1.1: 
                     curr_sol = perturbed
-                    print(f"  [GTS iter {iteration}] Double-bridge perturbation "
-                          f"→ {p_cost/100:.2f} km")
 
             # ── Build position map ───────────────────────────────────
             pos_map = self._node_positions(curr_sol)
+            base_cost = self._penalized_cost(curr_sol) if self.lam > 0 else self._total_cost(curr_sol)
 
             # ── Generate & evaluate moves ───────────────────────────
             best_move_delta = float('inf')
@@ -628,8 +637,9 @@ class GranularTabuSearch:
                     r_v, p_v = pos_map[v]
                     if r_v == r_u:
                         continue  # inter-route only cho relocate
-
-                    for p_ins in range(1, len(curr_sol[r_v]) - 1):
+                    
+                    p_v = pos_map[v][1]
+                    for p_ins in [p_v, p_v + 1]:
                         delta = self._delta_relocate(
                             curr_sol, pos_map, u, r_u, p_u, r_v, p_ins)
                         if delta is None:
@@ -637,8 +647,7 @@ class GranularTabuSearch:
                         move_key = ('rel1', u, r_v)
                         in_tabu  = tabu_dict.get(move_key, -1) >= iteration
                         # Aspiration: chấp nhận nếu vượt global best
-                        aspiration = (self._total_cost(curr_sol) + delta
-                                      < best_dist - 1e-6)
+                        aspiration = (base_cost + delta < best_dist - 1e-6)
                         if (not in_tabu or aspiration) and delta < best_move_delta:
                             best_move_delta = delta
                             best_move       = (u, r_u, p_u, r_v, p_ins)
@@ -663,8 +672,7 @@ class GranularTabuSearch:
                                     continue
                                 move_key2 = ('rel2', u, r_nb)
                                 in_tabu2  = tabu_dict.get(move_key2, -1) >= iteration
-                                aspiration2 = (self._total_cost(curr_sol) + delta2
-                                               < best_dist - 1e-6)
+                                aspiration2 = (base_cost + delta2 < best_dist - 1e-6)
                                 if ((not in_tabu2 or aspiration2)
                                         and delta2 < best_move_delta):
                                     best_move_delta = delta2
@@ -687,8 +695,7 @@ class GranularTabuSearch:
                         continue
                     move_key_s = ('swap', min(u, v), max(u, v))
                     in_tabu_s  = tabu_dict.get(move_key_s, -1) >= iteration
-                    aspiration_s = (self._total_cost(curr_sol) + delta_s
-                                    < best_dist - 1e-6)
+                    aspiration_s = (base_cost + delta_s < best_dist - 1e-6)
                     if ((not in_tabu_s or aspiration_s)
                             and delta_s < best_move_delta):
                         best_move_delta = delta_s
@@ -709,8 +716,7 @@ class GranularTabuSearch:
                         continue
                     move_key_2s = ('2opts', r_u, p_u, r_v, p_v)
                     in_tabu_2s  = tabu_dict.get(move_key_2s, -1) >= iteration
-                    aspiration_2s = (self._total_cost(curr_sol) + delta_2s
-                                     < best_dist - 1e-6)
+                    aspiration_2s = (base_cost + delta_2s < best_dist - 1e-6)
                     if ((not in_tabu_2s or aspiration_2s)
                             and delta_2s < best_move_delta):
                         best_move_delta = delta_2s
