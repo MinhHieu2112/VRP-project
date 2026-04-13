@@ -64,7 +64,6 @@ class SimulatedAnnealingSolver:
                    for n in route if n != 0)
 
     def initial_solution(self) -> list:
-        """[FIX-2] Dùng random_init (NNH) thay random_init → nghiệm tốt hơn ~40%."""
         sol = random_init(
             matrix      = self.dist,
             num_nodes   = self.n,

@@ -1,26 +1,36 @@
 {
-    "data_path": "../../Data/orsm_matrix.csv",
-    "locations_path": "../../Data/locations.csv",
-    "output_dir": "Results",
-    "common_model_parameters": {
-        "scaling_factor": 1000
+    "paths": {
+        "distance_matrix": "Data/orsm_matrix.csv",
+        "locations_data":  "Data/locations.csv",
+        "output_dir":      "Results"
+    },
+    "global_constraints": {
+        "max_vehicles":         200,
+        "vehicle_capacity":     10,
+        "default_demand":       1,
+        "penalty_unassigned":   100000,
+        "penalty_vehicle_over": 50000
     },
     "visualization": {
-        "osrm_url": "http://localhost:5001",
+        "osrm_url":     "http://localhost:5001",
+        "use_osrm":     true,
         "map_filename": "route_map.html",
-        "zoom_start": 13
-    },
-    "constraints": {
-        "max_vehicles": 200,
-        "vehicle_capacity": 10,
-        "default_demand": 1,
-        "penalty_unassigned": 1000000,
-        "penalty_vehicle_over": 500000
+        "zoom_start":   13
     },
     "alns_parameters": {
+        "_comment": "SA đọc block này qua config.get('alns_parameters'). Đơn vị nội bộ (KM_SCALE=100).",
         "start_temperature": 5000,
-        "end_temperature": 0.1,
-        "step": 0.9999,
-        "max_no_improve": 50000
+        "end_temperature":   0.1,
+        "step":              0.9999,
+        "max_no_improve":    50000,
+        "iter_per_temp":     500
+    },
+    "constraints": {
+        "_comment": "Alias global_constraints — SimulatedAnnealingSolver đọc fallback block này.",
+        "max_vehicles":         200,
+        "vehicle_capacity":     10,
+        "default_demand":       1,
+        "penalty_unassigned":   100000,
+        "penalty_vehicle_over": 50000
     }
 }

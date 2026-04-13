@@ -22,7 +22,6 @@ def load_config() -> dict:
     with open(path, 'r', encoding='utf-8') as f:
         return json.load(f)
 
-
 def run_sa():
     """Chạy toàn bộ pipeline SA: load → solve → save → visualize."""
     print("\n===== RUN SIMULATED ANNEALING =====")

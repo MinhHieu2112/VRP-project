@@ -5,10 +5,10 @@
         "output_dir":      "Results"
     },
     "global_constraints": {
-        "max_vehicles":        200,
-        "vehicle_capacity":    10,
-        "default_demand":      1,
-        "penalty_unassigned":  100000,
+        "max_vehicles":         200,
+        "vehicle_capacity":     10,
+        "default_demand":       1,
+        "penalty_unassigned":   100000,
         "penalty_vehicle_over": 50000
     },
     "visualization": {
@@ -18,7 +18,7 @@
         "zoom_start":   13
     },
     "alns_parameters": {
-        "_comment_scale": "Matrix đơn vị 10m (1 unit = 10m, KM_SCALE=100). Temperature phải cùng đơn vị.",
+        "_comment": "Temperature đơn vị nội bộ (1 unit=10m, KM_SCALE=100).",
         "max_no_improve":    2000,
         "start_temperature": 5000,
         "end_temperature":   1,
@@ -27,11 +27,11 @@
         "decay":             0.8
     },
     "constraints": {
-        "_comment": "Alias của global_constraints — dùng cho CvrpState.objective() backward-compat.",
-        "max_vehicles":        200,
-        "vehicle_capacity":    10,
-        "default_demand":      1,
-        "penalty_unassigned":  100000,
+        "_comment": "Alias global_constraints — dùng cho CvrpState.objective() backward-compat.",
+        "max_vehicles":         200,
+        "vehicle_capacity":     10,
+        "default_demand":       1,
+        "penalty_unassigned":   100000,
         "penalty_vehicle_over": 50000
     }
 }

@@ -18,22 +18,22 @@ from Utils.Pipeline import load_data, build_result, save_result, visualize, KM_S
 
 
 def load_config() -> dict:
-    """Đọc config.json của MILP."""
     path = os.path.join(CURRENT_DIR, 'config.json')
     with open(path, 'r', encoding='utf-8') as f:
         return json.load(f)
 
+
 def compute_upper_bound(matrix, demands_dict: dict,
-                         capacity: int, max_vehicles: int) -> float:
+                        capacity: int, max_vehicles: int) -> float:
     num_nodes = matrix.shape[0]
-    solution  = init_solution(          # ← dùng factory function
-        strategy      = "greedy",
-        matrix        = matrix,
-        num_nodes     = num_nodes,
-        capacity      = capacity,
-        demands       = demands_dict,   # ← đúng: init_solution nhận 'demands'
-        max_vehicles  = max_vehicles,
-        validate      = False,
+    solution  = init_solution(
+        strategy     = "random",
+        matrix       = matrix,
+        num_nodes    = num_nodes,
+        capacity     = capacity,
+        demands      = demands_dict,
+        max_vehicles = max_vehicles,
+        validate     = False,
     )
     ub_units = sum(
         sum(matrix[r[i], r[i+1]] for i in range(len(r)-1))
@@ -45,7 +45,6 @@ def compute_upper_bound(matrix, demands_dict: dict,
 
 
 def format_routes(routes_info: list) -> dict:
-    """Chuyển routes_info từ solver thành dict chuẩn."""
     routes = {}
     for idx, info in enumerate(routes_info):
         route = info['route']
@@ -56,19 +55,21 @@ def format_routes(routes_info: list) -> dict:
 
 
 def main(limit_nodes):
-    """Chạy toàn bộ pipeline MILP: load → ub → solve → save → visualize."""
     config = load_config()
     data   = load_data(config)
 
-    matrix    = data['distance_matrix'][:limit_nodes, :limit_nodes]
-    capacity  = data['vehicle_capacity']
-    df_locs   = data['df_locations']
+    matrix      = data['distance_matrix'][:limit_nodes, :limit_nodes]
+    capacity    = data['vehicle_capacity']
+    df_locs     = data['df_locations']
     demands_arr = data['demands'][:limit_nodes]
-    num_nodes = matrix.shape[0]
+    num_nodes   = matrix.shape[0]
 
     demands_dict = {i: int(demands_arr[i]) for i in range(num_nodes)}
-    max_v     = config.get('num_vehicles', 200)
-    timelimit = config.get('max_runtime_seconds', 120)
+
+    cons      = config.get('global_constraints', {})
+    milp_cfg  = config.get('solvers', {}).get('milp', {})
+    max_v     = cons.get('max_vehicles', 200)
+    timelimit = milp_cfg.get('max_runtime_seconds', 300)
 
     print(f"[MILP] {num_nodes} node | {max_v} xe | capacity={capacity} | "
           f"timelimit={timelimit}s")

@@ -1,6 +1,22 @@
 {
-    "num_vehicles": 200,
-    "vehicle_capacity": 10,
-    "max_runtime_seconds": 300,
-    "demands": 1
+    "paths": {
+        "distance_matrix": "Data/orsm_matrix.csv",
+        "locations_data":  "Data/locations.csv",
+        "output_dir":      "Results"
+    },
+    "global_constraints": {
+        "max_vehicles":     200,
+        "vehicle_capacity": 10,
+        "default_demand":   1
+    },
+    "visualization": {
+        "osrm_url":     "http://localhost:5001",
+        "use_osrm":     true,
+        "map_filename": "route_map.html"
+    },
+    "solvers": {
+        "milp": {
+            "max_runtime_seconds": 300
+        }
+    }
 }
