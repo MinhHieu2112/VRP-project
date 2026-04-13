@@ -1,6 +1,7 @@
 """
 Algorithms/Tabu/main_tabu.py
-Entry-point cho Tabu Search solver — sử dụng pipeline chuẩn hóa.
+Entry-point cho Granular Tabu Search solver.
+Cải tiến dựa trên Toth & Vigo (2003) và Gendreau et al. (1994).
 """
 
 import os
@@ -14,19 +15,17 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_DIR))
 sys.path.append(PROJECT_ROOT)
 
 from Algorithms.Init_strategies.Init_strategies import init_solution
-from Algorithms.Tabu.tabu_solver import TabuSearchSolver
+from Algorithms.Tabu.tabu_solver import GranularTabuSearch
 from Utils.Pipeline import load_data, build_result, save_result, visualize
 
 
 def load_config() -> dict:
-    """Đọc config_tabu.json của Tabu Search."""
     path = os.path.join(CURRENT_DIR, 'config_tabu.json')
     with open(path, 'r', encoding='utf-8') as f:
         return json.load(f)
 
 
 def verify_coverage(initial_state: list, num_nodes: int):
-    """Kiểm tra tất cả khách hàng được phục vụ sau khởi tạo."""
     served  = {n for r in initial_state for n in r if n != 0}
     missing = set(range(1, num_nodes)) - served
     if missing:
@@ -37,8 +36,7 @@ def verify_coverage(initial_state: list, num_nodes: int):
 
 
 def run_tabu():
-    """Chạy toàn bộ pipeline Tabu: load → init → solve → save → visualize."""
-    print("\n===== RUN TABU SEARCH =====")
+    print("\n===== RUN GRANULAR TABU SEARCH (Toth & Vigo, 2003) =====")
     config = load_config()
     data   = load_data(config)
 
@@ -49,11 +47,10 @@ def run_tabu():
     num_nodes = matrix.shape[0]
 
     demands_dict = {i: int(demands_arr[i]) for i in range(num_nodes)}
-
     tabu_p  = config['tabu_parameters']
     cons    = config['constraints']
 
-    # Khởi tạo nghiệm ban đầu bằng hàm init chung
+    # Khởi tạo bằng Clarke-Wright (tốt hơn random cho Tabu)
     initial_state = init_solution(
         strategy      = "random",
         matrix        = matrix,
@@ -61,27 +58,29 @@ def run_tabu():
         capacity      = capacity,
         demands       = demands_dict,
         max_vehicles  = cons['max_vehicles'],
-        validate      = False  # Đổi thành True nếu bạn muốn in thêm log kiểm tra
+        validate      = True,
     )
-
     verify_coverage(initial_state, num_nodes)
 
-    solver = TabuSearchSolver(
+    solver = GranularTabuSearch(
         distance_matrix = matrix,
         demands         = demands_dict,
         capacity        = capacity,
         max_v           = cons['max_vehicles'],
-        tabu_size       = tabu_p['tabu_size'],
-        max_iter        = tabu_p.get('max_iterations', 50000),
-        max_no_improve  = tabu_p.get('max_no_improve', 1000),
+        tabu_size       = tabu_p.get('tabu_size',        20),
+        max_iter        = tabu_p.get('max_iterations', 5000),
+        max_no_improve  = tabu_p.get('max_no_improve',  300),
+        granular_beta   = tabu_p.get('granular_beta',   1.5),
+        granular_k      = tabu_p.get('granular_k',       20),
+        penalty_lambda  = tabu_p.get('penalty_lambda',   1.0),
+        penalty_h       = tabu_p.get('penalty_h',        10),
     )
 
     start = time.time()
     best_state, best_cost_units = solver.solve(initial_state)
     elapsed = time.time() - start
 
-    result = build_result("Tabu Search", best_state, best_cost_units, elapsed)
-
+    result = build_result("Granular Tabu Search", best_state, best_cost_units, elapsed)
     save_result(result, config, "Tabu")
     visualize(result, config, "Tabu", df_locs)
 

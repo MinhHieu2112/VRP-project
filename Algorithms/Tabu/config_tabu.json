@@ -2,16 +2,37 @@
     "data_path": "../../Data/orsm_matrix.csv",
     "locations_path": "../../Data/locations.csv",
     "tabu_parameters": {
-        "tabu_size": 30,
-        "max_iterations": 50000,
-        "max_no_improve": 1000
+        "_comment": "Granular Tabu Search — Toth & Vigo (2003), Gendreau et al. (1994)",
+        "tabu_size":       20,
+        "max_iterations":  5000,
+        "max_no_improve":  300,
+
+        "_comment_granular": "granular_beta=1.5: threshold = 1.5 * avg_depot_dist * 2. granular_k=20: tối đa 20 lân cận/node.",
+        "granular_beta":   1.5,
+        "granular_k":      20,
+
+        "_comment_penalty": "penalty_lambda: trọng số phạt vi phạm capacity ban đầu. penalty_h: chu kỳ điều chỉnh adaptive penalty.",
+        "penalty_lambda":  1.0,
+        "penalty_h":       10
     },
     "constraints": {
-        "max_vehicles": 200,
-        "vehicle_capacity": 10,
+        "max_vehicles":       200,
+        "vehicle_capacity":   10,
         "penalty_unassigned": 1000000
     },
-    "common_model_parameters": {
-        "scaling_factor": 1000
+    "paths": {
+        "distance_matrix": "Data/orsm_matrix.csv",
+        "locations_data":  "Data/locations.csv",
+        "output_dir":      "Results"
+    },
+    "global_constraints": {
+        "max_vehicles":    200,
+        "vehicle_capacity": 10,
+        "default_demand":   1
+    },
+    "visualization": {
+        "osrm_url":     "http://localhost:5001",
+        "use_osrm":     true,
+        "map_filename": "route_map.html"
     }
 }
