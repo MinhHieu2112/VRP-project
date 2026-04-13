@@ -1,6 +1,6 @@
 {
     "paths": {
-        "distance_matrix": "Data/orsm_matrix.csv",
+        "distance_matrix": "Data/orsm_matrix_200.csv",
         "locations_data":  "Data/locations.csv",
         "output_dir":      "Results"
     },

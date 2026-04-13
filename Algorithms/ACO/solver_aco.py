@@ -34,15 +34,27 @@ def load_config() -> dict:
 
 def load_data_from_loader(config: dict) -> tuple:
     print("Initializing DataLoader...")
-    data             = DataLoader(config).load_data()     # [FIX-1] dict, not tuple
+    data             = DataLoader(config).load_data()
     matrix_int       = data['distance_matrix']
     vehicle_capacity = data['vehicle_capacity']
     df_locs          = data['df_locations']
     demands          = data['demands']
+
+    # --- ĐOẠN SỬA LỖI: Đồng bộ số lượng node ---
+    num_nodes_from_matrix = matrix_int.shape[0]
+    
+    # Chỉ lấy đúng số dòng tương ứng với ma trận từ file locations và demands
+    df_locs = df_locs.head(num_nodes_from_matrix)
+    demands = demands[:num_nodes_from_matrix]
+    # ------------------------------------------
+
     nodes = [
         Node(int(row['id']), float(row['lat']), float(row['lon']), float(demands[idx]))
         for idx, row in df_locs.iterrows()
     ]
+    
+    print(f"[ACO] Đã đồng bộ: {len(nodes)} nodes khớp với ma trận {matrix_int.shape}")
+    
     return len(nodes), nodes, matrix_int.astype(np.float64), vehicle_capacity, df_locs
 
 
