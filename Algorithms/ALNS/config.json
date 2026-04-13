@@ -1,28 +1,37 @@
 {
-    "data_path": "../../Data/orsm_matrix.csv",
-    "locations_path": "../../Data/locations.csv",
-    "output_dir": "result",
+    "paths": {
+        "distance_matrix": "Data/orsm_matrix.csv",
+        "locations_data":  "Data/locations.csv",
+        "output_dir":      "Results"
+    },
+    "global_constraints": {
+        "max_vehicles":        200,
+        "vehicle_capacity":    10,
+        "default_demand":      1,
+        "penalty_unassigned":  100000,
+        "penalty_vehicle_over": 50000
+    },
     "visualization": {
-        "osrm_url": "http://localhost:5001",
+        "osrm_url":     "http://localhost:5001",
+        "use_osrm":     true,
         "map_filename": "route_map.html",
-        "zoom_start": 13
-    },
-    "common_model_parameters": {
-        "scaling_factor": 100
-    },
-    "constraints": {
-        "max_vehicles": 200,
-        "vehicle_capacity": 10,
-        "default_demand": 1,
-        "penalty_unassigned": 50000000,
-        "penalty_vehicle_over": 5000000
+        "zoom_start":   13
     },
     "alns_parameters": {
-        "max_no_improve": 2000,
-        "start_temperature": 50000,
-        "end_temperature": 1,
-        "step": 0.9997,
-        "scores": [10, 5, 2, 0],
-        "decay": 0.8
+        "_comment_scale": "Matrix đơn vị 10m (1 unit = 10m, KM_SCALE=100). Temperature phải cùng đơn vị.",
+        "max_no_improve":    2000,
+        "start_temperature": 5000,
+        "end_temperature":   1,
+        "step":              0.9997,
+        "scores":            [10, 5, 2, 0],
+        "decay":             0.8
+    },
+    "constraints": {
+        "_comment": "Alias của global_constraints — dùng cho CvrpState.objective() backward-compat.",
+        "max_vehicles":        200,
+        "vehicle_capacity":    10,
+        "default_demand":      1,
+        "penalty_unassigned":  100000,
+        "penalty_vehicle_over": 50000
     }
 }

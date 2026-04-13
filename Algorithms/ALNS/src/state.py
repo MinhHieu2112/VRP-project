@@ -35,23 +35,33 @@ class CvrpState(State):
 
     def apply_2opt(self):
         """
-        2-opt nội tuyến để làm mịn lộ trình sau ALNS.
+        Or-opt nội tuyến thay thế 2-opt cổ điển, phù hợp với ACVRP bất đối xứng.
 
-        FIX: sau khi thay self.routes, đồng bộ lại route_loads.
-        Bản cũ chỉ gán self.routes mà không cập nhật route_loads,
-        khiến các thao tác sau (repair/greedy) dùng cache sai.
+        VẤN ĐỀ CỦA 2-OPT TRUYỀN THỐNG VỚI ACVRP:
+        2-opt đảo ngược đoạn route[i:j+1], điều này chỉ đúng với ma trận đối xứng
+        (d(A,B) == d(B,A)). Với ACVRP (d(i,j) ≠ d(j,i)), đảo ngược chiều đi
+        thường làm chi phí tăng — đó là lý do kết quả nhảy từ ~776 lên 799 km.
+
+        GIẢI PHÁP — Or-opt (relocate 1 node):
+        Thay vì đảo đoạn, thử dịch chuyển từng node sang vị trí khác trong cùng route.
+        Or-opt tương thích với ACVRP vì không đảo chiều cung.
+
+        Đây là local search làm mịn sau ALNS — không cần chạy quá nhiều vòng.
         """
+        import sys
+
         new_routes = []
-        actual_vehicles = [r for r in self.routes if len(r) > 2]
-        total = len(actual_vehicles)
+        active = [r for r in self.routes if len(r) > 2]
+        total  = len(active)
 
-        print(f"Đang tối ưu {total} xe:")
+        print(f"Đang Or-opt (relocate) {total} xe:")
 
-        for idx, route in enumerate(actual_vehicles):
-            percent = (idx + 1) / total * 100
+        for idx, route in enumerate(active):
+            percent  = (idx + 1) / total * 100
             progress = int(percent / 5)
-            bar = "█" * progress + "-" * (20 - progress)
-            sys.stdout.write(f"\r  Progress: [{bar}] {percent:.1f}% (Xe {idx+1}/{total})")
+            bar      = "█" * progress + "-" * (20 - progress)
+            sys.stdout.write(
+                f"\r  Progress: [{bar}] {percent:.1f}% (Xe {idx+1}/{total})")
             sys.stdout.flush()
 
             if len(route) <= 3:
@@ -59,38 +69,68 @@ class CvrpState(State):
                 continue
 
             best_route = route[:]
-            improved = True
-            max_inner_iters = 100
-            count = 0
+            improved   = True
+            max_iters  = 50   # giới hạn vòng lặp để không chạy quá lâu
 
-            while improved and count < max_inner_iters:
-                improved = False
-                for i in range(1, len(best_route) - 2):
-                    for j in range(i + 1, len(best_route) - 1):
-                        A, B = best_route[i - 1], best_route[i]
-                        C, D = best_route[j], best_route[j + 1]
+            while improved and max_iters > 0:
+                improved  = False
+                max_iters -= 1
 
-                        old_edge = self.distance_matrix[A, B] + self.distance_matrix[C, D]
-                        new_edge = self.distance_matrix[A, C] + self.distance_matrix[B, D]
+                for i in range(1, len(best_route) - 1):
+                    node  = best_route[i]
+                    prev_i = best_route[i - 1]
+                    next_i = best_route[i + 1]
 
-                        if new_edge < old_edge - 0.00001:
-                            best_route[i:j + 1] = reversed(best_route[i:j + 1])
-                            improved = True
-                count += 1
+                    # Chi phí khi bỏ node ra khỏi vị trí hiện tại
+                    cost_remove = (
+                        self.distance_matrix[prev_i, node]
+                        + self.distance_matrix[node, next_i]
+                        - self.distance_matrix[prev_i, next_i]
+                    )
+
+                    best_gain = 0
+                    best_j    = -1
+
+                    for j in range(1, len(best_route) - 1):
+                        if j == i or j == i - 1:
+                            continue
+                        prev_j = best_route[j - 1]
+                        next_j = best_route[j]
+
+                        # Chi phí khi chèn node vào sau vị trí j-1
+                        cost_insert = (
+                            self.distance_matrix[prev_j, node]
+                            + self.distance_matrix[node, next_j]
+                            - self.distance_matrix[prev_j, next_j]
+                        )
+
+                        gain = cost_remove - cost_insert
+                        if gain > best_gain + 1e-6:
+                            best_gain = gain
+                            best_j    = j
+
+                    if best_j != -1:
+                        # Thực hiện move: xóa node khỏi i, chèn vào best_j
+                        route_tmp = best_route[:]
+                        route_tmp.pop(i)
+                        # Điều chỉnh index sau khi pop
+                        insert_at = best_j if best_j < i else best_j - 1
+                        route_tmp.insert(insert_at, node)
+                        best_route = route_tmp
+                        improved   = True
+                        break  # restart từ đầu route sau mỗi move
 
             new_routes.append(best_route)
 
         self.routes = new_routes
 
-        # FIX: đồng bộ lại route_loads sau khi routes thay đổi
-        # (2-opt không thay đổi thành phần khách hàng nên loads không đổi,
-        #  nhưng gán lại để đảm bảo cache luôn nhất quán với routes)
+        # Đồng bộ route_loads (Or-opt không thay đổi thành phần khách hàng)
         self.route_loads = [
             sum(self.demands[node] for node in r if node != 0)
             for r in self.routes
         ]
 
-        print("\n[XONG] Đã tối ưu xong toàn bộ lộ trình.")
+        print("\n[XONG] Đã xong toàn bộ lộ trình.")
 
     def copy(self):
         new_state = object.__new__(CvrpState)

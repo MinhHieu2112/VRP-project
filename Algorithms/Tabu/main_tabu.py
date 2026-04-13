@@ -13,7 +13,7 @@ CURRENT_DIR  = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_DIR))
 sys.path.append(PROJECT_ROOT)
 
-from Algorithms.Init_strategies.Init_strategies import random_init
+from Algorithms.Init_strategies.Init_strategies import init_solution
 from Algorithms.Tabu.tabu_solver import TabuSearchSolver
 from Utils.Pipeline import load_data, build_result, save_result, visualize
 
@@ -53,15 +53,17 @@ def run_tabu():
     tabu_p  = config['tabu_parameters']
     cons    = config['constraints']
 
-    # Khởi tạo nghiệm ban đầu bằng NNH ngẫu nhiên
-    initial_state = random_init(
+    # Khởi tạo nghiệm ban đầu bằng hàm init chung
+    initial_state = init_solution(
+        strategy      = "random",
         matrix        = matrix,
         num_nodes     = num_nodes,
         capacity      = capacity,
         demands       = demands_dict,
-        default_demand= 1.0,
         max_vehicles  = cons['max_vehicles'],
+        validate      = False  # Đổi thành True nếu bạn muốn in thêm log kiểm tra
     )
+
     verify_coverage(initial_state, num_nodes)
 
     solver = TabuSearchSolver(
@@ -70,8 +72,8 @@ def run_tabu():
         capacity        = capacity,
         max_v           = cons['max_vehicles'],
         tabu_size       = tabu_p['tabu_size'],
-        max_iter        = tabu_p.get('max_iterations', 50_000),
-        max_no_improve  = tabu_p.get('max_no_improve', 1_000),
+        max_iter        = tabu_p.get('max_iterations', 50000),
+        max_no_improve  = tabu_p.get('max_no_improve', 1000),
     )
 
     start = time.time()

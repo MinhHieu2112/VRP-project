@@ -4,7 +4,13 @@ from alns.select import RouletteWheel
 from .operators.destroy_operators import random_removal, worst_removal
 from .operators.repair_operators import greedy_insertion, regret_insertion
 
-METERS_TO_KM = 1000
+# FIX: DataLoader scale raw_meters / 10 → units (1 unit = 10m).
+# Để ra km phải chia KM_SCALE = 100, không phải 1000.
+# Dùng import từ Pipeline để đảm bảo nhất quán với toàn bộ project.
+try:
+    from Utils.Pipeline import KM_SCALE
+except ImportError:
+    KM_SCALE = 100   # fallback: 1 unit = 10m → 100 units = 1 km
 
 
 def configure_alns(initial_state, config):
@@ -32,12 +38,12 @@ def configure_alns(initial_state, config):
     )
 
     def on_best_found(state, rnd_state):
-        # FIX: chia 1000 (mét → km) trực tiếp, không dùng scaling_factor từ config
+        # FIX: chia KM_SCALE (100) thay vì 1000
         actual_km = sum(
             state.route_cost(r)
             for r in state.routes
             if len(r) > 2
-        ) / METERS_TO_KM
+        ) / KM_SCALE
         unassigned = len(state.unassigned)
         print(
             f"[ALNS] Lời giải tốt hơn: {actual_km:.2f} km"

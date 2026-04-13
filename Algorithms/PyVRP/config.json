@@ -1,0 +1,31 @@
+{
+    "project_metadata": {
+        "solver": "PyVRP (Hybrid Genetic Search)",
+        "description": "Config riêng cho PyVRP, tuân thủ key schema của Utils/config.json"
+    },
+    "paths": {
+        "distance_matrix": "Data/orsm_matrix.csv",
+        "locations_data":  "Data/locations.csv",
+        "output_dir":      "Results"
+    },
+    "common_model_parameters": {
+        "num_points": 1600,
+        "depot_id":   0
+    },
+    "global_constraints": {
+        "max_vehicles":    200,
+        "vehicle_capacity": 10,
+        "default_demand":   1
+    },
+    "visualization": {
+        "osrm_url":     "http://localhost:5001",
+        "use_osrm":     true,
+        "map_filename": "route_map.html"
+    },
+    "solvers": {
+        "py_vrp": {
+            "no_improve_iters": 40000,
+            "display_log":      true
+        }
+    }
+}
