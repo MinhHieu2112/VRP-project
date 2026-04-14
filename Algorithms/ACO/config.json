@@ -16,15 +16,15 @@
     },
     "solvers": {
         "aco": {
-            "ants_num":         40,
-            "max_iter":         20000,
-            "no_improve_limit": 1000,
+            "ants_num":         10,
+            "max_iter":         5000,
+            "no_improve_limit": 500,
             "alpha":            1.0,
             "beta":             2.0,
             "q0":               0.8,
             "rho":              0.1,
             "xi":               0.01,
-            "seed_strategy":    "clarke_wright",
+            "seed_strategy":    "random",
             "seed_weight":      1.1
         }
     }

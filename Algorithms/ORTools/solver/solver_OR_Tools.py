@@ -1,5 +1,4 @@
 import math
-import random
 import time
 from ortools.constraint_solver import routing_enums_pb2, pywrapcp
 
@@ -140,7 +139,6 @@ class ORToolsSolver:
 
         # 4. Search params
         params = pywrapcp.DefaultRoutingSearchParameters()
-        params.random_seed = random.randint(1, 1000000)
 
         fs_str = (
             solver_cfg.get("first_solution_strategy", "PATH_CHEAPEST_ARC")

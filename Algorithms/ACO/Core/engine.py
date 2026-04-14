@@ -1,26 +1,3 @@
-"""
-Algorithms/ACO/Core/engine.py
-==============================
-BasicACO — Ant Colony System (ACS) cho ACVRP.
-Tham chiếu: Dorigo & Gambardella (1997), báo cáo mục 2.4.3.
-
-FIXES:
-  [FIX-UNIT]    In đơn vị nhất quán: X units (Y km) với Y=X/100.
-                Cũ in /1000 → sai 10× (779 km hiện thành 77.9 km).
-
-  [FIX-FEASIBLE] cal_next_index_meet_constrains() là O(n) Python loop.
-                Với 1600 điểm avg remaining ~800 → bottleneck chính.
-                Fix: vectorized numpy feasibility check.
-
-  [FIX-EXPLORE] seed_weight=2.0 + q0=0.9 khóa kiến vào greedy path.
-                Fix: Exploration boost khi stuck no_improve/2 iterations
-                (giảm q0 tạm thời từ 0.9 xuống ~0.7).
-
-  [FIX-1] numpy fancy indexing ổn định (feasible_nodes list tùy ý).
-  [FIX-2] local_update cho cạnh cuối về depot sau force_visit.
-  [FIX-3] _count_valid_vehicles xử lý path không kết thúc bằng depot.
-  [FIX-6] Đếm customer_steps thay total_steps tránh false WARN.
-"""
 
 import numpy as np
 import random
@@ -29,6 +6,9 @@ from Models.cvrp_base import CVRPGraph
 from Core.ant import Ant
 
 KM_SCALE = 100  # 1 unit = 10m, 1 km = 100 units
+
+# Số láng giềng tối đa trong candidate list
+CANDIDATE_K = 20
 
 
 class BasicACO:
@@ -52,11 +32,46 @@ class BasicACO:
         self.best_path: list | None           = None
         self.best_vehicle_num: int | None     = None
 
-        # [FIX-FEASIBLE] Cache demands array để vectorized check
+        # Cache demands array để vectorized check
         self._demands = np.array(
             [graph.nodes[i].demand for i in range(graph.node_num)],
-            dtype=np.float64
+            dtype=np.float32  # [PERF-4] float32 đủ cho demand values
         )
+
+        # [PERF-2] Precompute candidate lists (top-K láng giềng gần nhất cho mỗi node)
+        self._candidate_lists = self._build_candidate_lists(k=CANDIDATE_K)
+        print(f"[ACO] Candidate lists built: top-{CANDIDATE_K} per node, "
+              f"n={graph.node_num}, ants={ants_num}")
+
+    # ──────────────────────────────────────────────────────────────────
+    # Precompute candidate lists
+    # ──────────────────────────────────────────────────────────────────
+
+    def _build_candidate_lists(self, k: int) -> np.ndarray:
+        """
+        Lưu dưới dạng numpy array (node_num, k) dtype=int32.
+
+        Với n=1000, k=20:
+          - Mỗi node chỉ xét 20 neighbor thay vì ~500 feasible nodes
+          - Thời gian precompute: O(n² log k) một lần duy nhất
+          - Thời gian mỗi bước chọn: O(k) thay vì O(n)
+        """
+        n = self.graph.node_num
+        dist_mat = self.graph.node_dist_mat  # (n, n)
+        candidate_lists = np.zeros((n, k), dtype=np.int32)
+
+        for i in range(n):
+            row = dist_mat[i].copy()
+            row[i] = np.inf  # loại bỏ self
+            row[0] = np.inf  # loại bỏ depot (depot được xử lý riêng)
+            # Lấy k node gần nhất
+            nearest = np.argpartition(row, min(k, n - 2))[:min(k, n - 2)]
+            nearest = nearest[np.argsort(row[nearest])]
+            candidate_lists[i, :len(nearest)] = nearest
+            if len(nearest) < k:
+                candidate_lists[i, len(nearest):] = -1  # padding
+
+        return candidate_lists
 
     # ──────────────────────────────────────────────────────────────────
     # Public API
@@ -73,15 +88,6 @@ class BasicACO:
     # ──────────────────────────────────────────────────────────────────
 
     def _basic_aco(self):
-        """
-        Vòng lặp ACS:
-          1. Kiến xây nghiệm + local pheromone update
-          2. Cập nhật best
-          3. Global pheromone update (1 chiều, ACVRP)
-          4. Early stopping
-
-        [FIX-EXPLORE] q0 động: khi stuck no_improve/2 → giảm q0 để explore.
-        """
         start_time       = time.time()
         no_improve_count = 0
         q0_current       = self.q0
@@ -95,13 +101,12 @@ class BasicACO:
                       f"(ngưỡng={self.no_improve_limit}).")
                 break
 
-            # [FIX-EXPLORE] Boost exploration khi stuck giữa chừng
             if no_improve_count == half_limit:
                 q0_current = max(self.q0 - 0.2, 0.5)
                 print(f"  [ACO] Exploration boost tại iter {iteration}: "
                       f"q0 {self.q0:.2f}→{q0_current:.2f}")
             elif no_improve_count == 0 and q0_current != self.q0:
-                q0_current = self.q0  # Khôi phục sau khi improve
+                q0_current = self.q0
 
             ants = [Ant(self.graph) for _ in range(self.ants_num)]
             for ant in ants:
@@ -113,10 +118,8 @@ class BasicACO:
                         or ant.total_travel_distance < self.best_path_distance):
                     self.best_path          = ant.travel_path[:]
                     self.best_path_distance = ant.total_travel_distance
-                    self.best_vehicle_num   = self._count_valid_vehicles(
-                        self.best_path)
+                    self.best_vehicle_num   = self._count_valid_vehicles(self.best_path)
                     improved = True
-                    # [FIX-UNIT] In đúng đơn vị: units và km
                     km = self.best_path_distance / KM_SCALE
                     print(f"[iter {iteration:5d}] Improved: "
                           f"{self.best_path_distance:.0f} units ({km:.2f} km), "
@@ -124,7 +127,8 @@ class BasicACO:
 
             no_improve_count = 0 if improved else no_improve_count + 1
 
-            self.graph.global_update_pheromone(
+            # [PERF-1] Global update chỉ trên best_path
+            self.graph.global_update_pheromone_sparse(
                 self.best_path, self.best_path_distance)
 
             if iteration % 50 == 0 and iteration > 0:
@@ -144,14 +148,12 @@ class BasicACO:
     # ──────────────────────────────────────────────────────────────────
 
     def _construct_solution(self, ant: Ant, q0: float):
-        """
-        [FIX-6] Đếm customer_steps (không đếm depot return) → tránh false WARN.
-        [FIX-FEASIBLE] Dùng _get_feasible_vectorized thay Python loop.
-        [FIX-2] local_update cho cạnh cuối về depot.
-        """
         n_customers        = self.graph.node_num - 1
         max_customer_steps = n_customers
         customer_steps     = 0
+
+        # [PERF-5] Batch local update: tích lũy (from, to) thay vì update ngay
+        local_update_batch = []
 
         while not ant.index_to_visit_empty():
 
@@ -162,14 +164,14 @@ class BasicACO:
                 ant.force_visit_remaining(remaining)
                 break
 
-            # [FIX-FEASIBLE] Vectorized
-            feasible = self._get_feasible_vectorized(ant)
+            # [PERF-2] Vectorized feasibility trên candidate list trước
+            feasible = self._get_feasible_candidates(ant)
 
             if not feasible:
                 if not ant.is_at_depot():
                     prev = ant.current_index
                     ant.move_to_next_index(0)
-                    self.graph.local_update_pheromone(prev, 0)
+                    local_update_batch.append((prev, 0))
                 else:
                     print("[ERROR] Ant kẹt tại depot — demand đơn lẻ > capacity.")
                     ant.force_visit_remaining(ant.index_to_visit)
@@ -178,49 +180,74 @@ class BasicACO:
                 prev       = ant.current_index
                 next_index = self.select_next_index(ant, feasible, q0)
                 ant.move_to_next_index(next_index)
-                self.graph.local_update_pheromone(prev, next_index)
+                local_update_batch.append((prev, next_index))
                 if next_index != 0:
                     customer_steps += 1
 
         if not ant.is_at_depot():
             prev = ant.current_index
             ant.move_to_next_index(0)
-            # [FIX-2] Cập nhật pheromone cạnh cuối về depot
-            self.graph.local_update_pheromone(prev, 0)
+            local_update_batch.append((prev, 0))
 
-    def _get_feasible_vectorized(self, ant: Ant) -> list:
+        # [PERF-5] Apply batch local update một lần sau khi kiến hoàn thành
+        self._apply_local_update_batch(local_update_batch)
+
+    def _get_feasible_candidates(self, ant: Ant) -> list:
         """
-        [FIX-FEASIBLE] Vectorized feasibility check.
+        [PERF-2] Ưu tiên candidate list trước, fallback về toàn bộ nếu cần.
 
-        Thay: [i for i in to_visit if load + demand[i] <= cap]  ← O(n) Python
-        Bằng: numpy boolean mask → O(n) C backend, ~5-10× nhanh hơn.
-
-        avg remaining cho 1600 điểm = ~800 nodes:
-          Python: 800 × (dict lookup + comparison) ≈ 800 ops, slow
-          Numpy:  1 slice + 1 broadcast comparison → 800 ops, fast C
+        Luồng:
+          1. Lấy top-K neighbors của node hiện tại
+          2. Lọc: chỉ giữ node chưa thăm VÀ thỏa capacity
+          3. Nếu có → trả về danh sách này (thường đủ)
+          4. Nếu rỗng → fallback: vectorized check toàn bộ to_visit
+             (tránh bỏ sót node hợp lệ nằm ngoài top-K)
         """
-        to_visit_arr = np.array(ant.index_to_visit, dtype=int)
+        current = ant.current_index
+        to_visit_set = ant._index_to_visit_set
+        load = ant.vehicle_load
+        capacity = self.graph.vehicle_capacity
+        demands = self._demands
+
+        # Bước 1: Xét candidate list của node hiện tại
+        candidates = self._candidate_lists[current]
+        feasible_from_candidates = []
+        for nb in candidates:
+            if nb == -1:
+                break  # padding
+            if nb in to_visit_set and (load + demands[nb]) <= capacity:
+                feasible_from_candidates.append(int(nb))
+
+        if feasible_from_candidates:
+            return feasible_from_candidates
+
+        # Bước 2: Fallback — vectorized check toàn bộ to_visit
+        # (chỉ khi candidate list không có node hợp lệ)
+        to_visit_arr = np.array(list(to_visit_set), dtype=np.int32)
         if len(to_visit_arr) == 0:
             return []
-
-        node_demands  = self._demands[to_visit_arr]
-        feasible_mask = (ant.vehicle_load + node_demands) <= self.graph.vehicle_capacity
+        node_demands  = demands[to_visit_arr]
+        feasible_mask = (load + node_demands) <= capacity
         return to_visit_arr[feasible_mask].tolist()
+
+    def _apply_local_update_batch(self, batch: list):
+        """
+        [PERF-5] Apply tất cả local updates sau khi kiến hoàn thành.
+        Gộp vào một loop thay vì gọi hàm N lần qua Python overhead.
+        """
+        xi  = self.graph.xi
+        tau0 = self.graph.init_pheromone_val
+        pm   = self.graph.pheromone_mat
+        for (i, j) in batch:
+            pm[i][j] = (1.0 - xi) * pm[i][j] + xi * tau0
 
     # ──────────────────────────────────────────────────────────────────
     # Chọn node tiếp theo — ACS transition rule
     # ──────────────────────────────────────────────────────────────────
 
     def select_next_index(self, ant: Ant, feasible_nodes: list, q0: float) -> int:
-        """
-        ACS rule với q0 động:
-          q < q0  → exploitation: argmax score
-          q ≥ q0  → exploration: roulette wheel
-
-        [FIX-1] numpy fancy indexing ổn định.
-        """
         current_index = ant.current_index
-        feasible_arr  = np.array(feasible_nodes, dtype=int)
+        feasible_arr  = np.array(feasible_nodes, dtype=np.int32)
 
         pheromone = self.graph.pheromone_mat[current_index][feasible_arr]
         heuristic = self.graph.heuristic_info_mat[current_index][feasible_arr]
@@ -255,7 +282,7 @@ class BasicACO:
 
     @staticmethod
     def _count_valid_vehicles(path: list) -> int:
-        """[FIX-3] Đếm đúng số xe kể cả path không kết thúc bằng depot."""
+        """Đếm đúng số xe kể cả path không kết thúc bằng depot."""
         count, has_customer = 0, False
         for node in path[1:]:
             if node == 0:
