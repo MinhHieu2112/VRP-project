@@ -1,19 +1,3 @@
-"""
-Algorithms/ALNS/main.py
-=======================
-Entry-point cho ALNS solver.
-
-Luồng chuẩn hóa:
-  Pipeline.load_data()        → matrix (unit = 10m, KM_SCALE=100), demands, df_locs
-  build_initial_state()       → CvrpState (nghiệm ban đầu capacity_greedy)
-  configure_alns()            → alns, accept (SA autofit), select (RouletteWheel)
-  alns.iterate(NoImprovementStop) → tối ưu
-  best_state.apply_2opt()     → làm mịn
-  Pipeline.build_result()     → chuẩn hóa kết quả (tự chia KM_SCALE)
-  Pipeline.save_result()      → lưu txt
-  Pipeline.visualize()        → bản đồ folium
-"""
-
 import os
 import sys
 import json
@@ -21,8 +5,7 @@ import time
 import threading
 import numpy as np
 
-# Đảm bảo PROJECT_ROOT trong sys.path để import Utils.*
-_THIS_DIR    = os.path.dirname(os.path.realpath(__file__))
+_THIS_DIR     = os.path.dirname(os.path.realpath(__file__))
 _PROJECT_ROOT = os.path.normpath(os.path.join(_THIS_DIR, '..', '..'))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
@@ -31,6 +14,7 @@ from Utils.Pipeline import load_data, build_result, save_result, visualize, KM_S
 from Algorithms.Init_strategies.Init_strategies import init_solution
 from src.state import CvrpState
 from src.solver import configure_alns
+
 
 # ── Stopping criterion ────────────────────────────────────────────────────────
 
@@ -55,7 +39,6 @@ class NoImprovementStop:
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def load_config(path: str = None) -> dict:
-    """Đọc config.json của ALNS (nằm cùng thư mục với main.py)."""
     if path is None:
         path = os.path.join(_THIS_DIR, 'config.json')
     with open(path, 'r', encoding='utf-8') as f:
@@ -64,10 +47,9 @@ def load_config(path: str = None) -> dict:
 
 def build_initial_state(data: dict, config: dict) -> CvrpState:
     """
-    Tạo nghiệm ban đầu bằng capacity_greedy, bọc vào CvrpState.
+    [CFG-1] Tạo nghiệm ban đầu theo init_strategy từ config.
 
     data['distance_matrix'] đã được Pipeline chuẩn hóa (unit = 10m).
-    demands là np.ndarray → chuyển sang dict để Init_strategies dùng.
     """
     matrix   = data['distance_matrix']
     capacity = data['vehicle_capacity']
@@ -77,8 +59,13 @@ def build_initial_state(data: dict, config: dict) -> CvrpState:
     demands_dict = {i: int(demands_arr[i]) for i in range(num_nodes)}
     constraints  = config.get('global_constraints', config.get('constraints', {}))
 
+    # [CFG-1] Đọc strategy từ alns_parameters, default = "clarke_wright"
+    alns_cfg      = config.get('alns_parameters', {})
+    init_strategy = alns_cfg.get('init_strategy', 'clarke_wright')
+    print(f"[ALNS] Khởi tạo nghiệm bằng chiến lược: '{init_strategy}'")
+
     routes = init_solution(
-        strategy       = "clarke_wright",
+        strategy       = init_strategy,
         matrix         = matrix,
         num_nodes      = num_nodes,
         capacity       = capacity,
@@ -113,23 +100,22 @@ def main():
 
     # 1. Config & data
     config = load_config()
-    data   = load_data(config)          # DataLoader: matrix unit=10m, KM_SCALE=100
+    data   = load_data(config)
 
     matrix   = data['distance_matrix']
     df_locs  = data['df_locations']
     capacity = data['vehicle_capacity']
 
-    # 2. Nghiệm ban đầu
-    init_state    = build_initial_state(data, config)
-    init_cost_km  = sum(init_state.route_cost(r)
-                        for r in init_state.routes) / KM_SCALE
+    # 2. Nghiệm ban đầu (strategy từ config)
+    init_state   = build_initial_state(data, config)
+    init_cost_km = sum(init_state.route_cost(r)
+                       for r in init_state.routes) / KM_SCALE
 
     print(f"[*] {matrix.shape[0]-1} khách hàng | "
           f"{len(init_state.routes)} xe ban đầu | capacity={capacity}")
     print(f"[*] Quãng đường ban đầu: {init_cost_km:.2f} km")
 
     # 3. Cấu hình ALNS
-    #    configure_alns dùng SA.autofit từ init_obj thực → temperature tự khớp scale
     alns, accept, select, _ = configure_alns(init_state, config)
 
     p              = config['alns_parameters']
@@ -137,7 +123,7 @@ def main():
     print(f"--- Tối ưu (dừng sau {max_no_improve} vòng không cải thiện) ---")
 
     # 4. Shared state cho callback + progress thread
-    shared     = [init_cost_km, 0, 0]   # [best_km, unassigned, improvements]
+    shared     = [init_cost_km, 0, 0]
     stop_flag  = threading.Event()
     start_time = time.time()
 
@@ -176,7 +162,6 @@ def main():
     elapsed = time.time() - start_time
 
     # 7. Build & save result
-    #    build_result nhận total_cost_units (đơn vị nội bộ) → tự chia KM_SCALE
     active_routes    = [r for r in best_state.routes if len(r) > 2]
     total_cost_units = sum(best_state.route_cost(r) for r in active_routes)
 

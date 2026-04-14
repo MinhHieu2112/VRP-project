@@ -16,13 +16,16 @@
     },
     "tabu_parameters": {
         "_comment": "Granular Tabu Search — Toth & Vigo (2003), Gendreau et al. (1994)",
-        "tabu_size":       80,
-        "max_iterations":  20000,
-        "max_no_improve":  2000,
-        "granular_beta":   1.25,
-        "granular_k":      20,
-        "penalty_lambda":  1.0,
-        "penalty_h":       50
+        "_comment_perf": "Tham số được tinh chỉnh cho n<=500. Với n<=200: max_iter~3000, max_no_improve~400.",
+        "tabu_size":       20,
+        "max_iterations":  3000,
+        "max_no_improve":  400,
+        "granular_beta":   1.5,
+        "granular_k":      15,
+        "penalty_lambda":  null,
+        "penalty_h":       20,
+        "init_strategy":   "clarke_wright",
+        "_init_options":   ["random", "greedy", "clarke_wright"]
     },
     "constraints": {
         "max_vehicles":       200,

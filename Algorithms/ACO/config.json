@@ -24,7 +24,8 @@
             "q0":               0.8,
             "rho":              0.1,
             "xi":               0.01,
-            "seed_strategy":    "random",
+            "seed_strategy":    "greedy",
+            "_seed_options":    ["random", "greedy", "clarke_wright"],
             "seed_weight":      1.1
         }
     }

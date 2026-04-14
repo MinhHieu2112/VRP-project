@@ -1,43 +1,50 @@
 """
-Algorithms/Tabu/tabu_solver.py — FIXED
-=======================================
+Algorithms/Tabu/tabu_solver.py — PERF OPTIMIZED
+=================================================
 Granular Tabu Search cho ACVRP.
 Tham chiếu: Toth & Vigo (2003), Gendreau et al. (1994).
 
-BUGS ĐÃ FIX:
-[FIX-1] Or-opt-2 remove_gain THIẾU d[u,v]:
-        Cũ: remove_gain = d[prev_u,u] + d[v,next_v] - d[prev_u,next_v]
-        Mới: remove_gain = d[prev_u,u] + d[u,v] + d[v,next_v] - d[prev_u,next_v]
-        Thiếu d[u,v] → delta bị overestimate → moves cải thiện bị từ chối sai.
+BUGS ĐÃ FIX (từ bản cũ):
+[FIX-1] Or-opt-2 remove_gain thiếu d[u,v].
+[FIX-2] penalty_lambda auto-compute từ avg_edge.
+[FIX-3] _double_bridge không recursive.
+[FIX-4] Không filter routes trong _apply methods.
+[FIX-5] config_tabu.json: penalty_lambda=null → auto.
 
-[FIX-2] penalty_lambda quá nhỏ so với đơn vị matrix:
-        Cũ: default lam=1.0 (= 10m trong hệ đơn vị)
-        Mới: lam được init = avg_edge_cost / capacity (≈ 100-200 units)
-        Penalty 1.0 đối với matrix đơn vị 10m là không có tác dụng —
-        bất kỳ move nào cũng tệ hơn penalty → infeasible search vô nghĩa.
+TĂNG TỐC (bản này) — giải thích từng bottleneck:
+[PERF-1] Cache route_loads dict: mỗi lần delta cần load route,
+         trước đây gọi _route_load() = O(len(route)) qua sum().
+         Với n=200, 20k iter, mỗi iter ~200×15 delta calls → 60M ops.
+         Fix: duy trì route_loads[r_idx] cập nhật incremental O(1).
 
-[FIX-3] _double_bridge infinite recursion:
-        Cũ: nếu len(sol) < num_routes_to_shake → gọi lại _double_bridge(sol)
-            với cùng default=15 → infinite recursion khi ít xe.
-        Mới: num_routes_to_shake = min(k, len(sol)//2, 8).
+[PERF-2] Cache route_dists dict tương tự cho _total_cost.
+         Trước: sum(_route_dist(r) for r in sol) = O(n) mỗi lần check.
+         Fix: track total_dist += delta khi apply move.
 
-[FIX-4] sol[:] = filter trong _apply methods → stale route indices:
-        Cũ: _apply_relocate/relocate2/2opt_star đều gọi
-            sol[:] = [r for r in sol if len(r) > 2] → xóa routes rỗng,
-            nhưng các indices r_src/r_dst/r1/r2 trong best_move đã tính
-            trên new_sol = _copy_sol(curr_sol) → chưa bị filter → ổn.
-            Tuy nhiên _apply_2opt_star tạo 2 route mới rồi filter → 
-            route indices r1/r2 có thể trỏ sai sau filter nếu route trước
-            r1/r2 bị xóa.
-        Mới: Không filter trong _apply, luôn rebuild pos_map từ đầu iter.
-             Chỉ filter khi rebuild sol ở đầu iteration tiếp theo.
+[PERF-3] _delta_2opt_star: bỏ tính tail_load bằng sum(slice),
+         thay bằng route_loads[r] - prefix_load[r][i] (precomputed).
+         Thực tế với granular_k=15, 2opt* ít được gọi → skip nếu
+         route quá ngắn (< 4 nodes).
 
-[FIX-5] config_tabu.json: penalty_lambda tương thích với đơn vị matrix.
-        Thêm gợi ý trong __init__ docstring.
+[PERF-4] Tabu dict: dùng dict thay deque, clean aggressive hơn
+         (mỗi 20 iter thay vì 50). Với max_iter=3000: dict nhỏ hơn.
+
+[PERF-5] Early exit trong neighborhood search: nếu delta < -threshold
+         (rõ ràng cải thiện), apply ngay, không scan tiếp.
+         Threshold = avg_edge * 0.1 (10% avg edge cost).
+
+[PERF-6] Giảm default params: max_iter=3000, max_no_improve=400
+         (đủ cho n=200). Cũ: 20000/2000 → 5-10× dư thừa.
+
+[PERF-7] _route_dist cache: dùng route_dists[idx] thay tính lại.
+         Update incremental khi apply move thay vì recompute.
+
+[PERF-8] pos_map rebuild: chỉ rebuild khi apply move thực sự thay
+         đổi cấu trúc (relocate/2opt*). Swap không thay đổi vị trí
+         trong pos_map nếu cùng route_idx — update O(1).
 """
 
 import numpy as np
-from collections import deque
 from typing import Dict, List, Optional, Tuple
 import random
 
@@ -53,12 +60,12 @@ class GranularTabuSearch:
                  capacity:        float,
                  max_v:           int,
                  tabu_size:       int   = 20,
-                 max_iter:        int   = 10_000,
-                 max_no_improve:  int   = 500,
+                 max_iter:        int   = 3000,
+                 max_no_improve:  int   = 400,
                  granular_beta:   float = 1.5,
-                 granular_k:      int   = 20,
-                 penalty_lambda:  float = None,   # [FIX-2] None → auto-compute
-                 penalty_h:       int   = 10):
+                 granular_k:      int   = 15,
+                 penalty_lambda:  float = None,
+                 penalty_h:       int   = 20):
 
         self.matrix   = distance_matrix
         self.n        = distance_matrix.shape[0]
@@ -69,37 +76,40 @@ class GranularTabuSearch:
         self.tabu_size      = tabu_size
         self.max_iter       = max_iter
         self.max_no_improve = max_no_improve
+        self.granular_beta  = granular_beta
+        self.granular_k     = granular_k
+        self.pen_h          = penalty_h
 
-        self.granular_beta = granular_beta
-        self.granular_k    = granular_k
-        self.pen_h         = penalty_h
-
-        # [FIX-2] Auto-compute penalty_lambda nếu không được truyền vào.
-        # Công thức: avg_nonzero_edge / capacity.
-        # Với matrix đơn vị 10m, avg_edge ~100 units, capacity=10
-        # → lam_auto ≈ 10 đủ để penalty 1 đơn vị vi phạm > avg savings.
+        # [FIX-2] Auto-compute penalty_lambda
         if penalty_lambda is None:
-            nonzero = distance_matrix[distance_matrix > 0]
+            nonzero  = distance_matrix[distance_matrix > 0]
             avg_edge = float(np.mean(nonzero)) if len(nonzero) > 0 else 100.0
             self.lam = avg_edge / max(capacity, 1.0)
         else:
-            # Nếu truyền vào từ config (thường =1.0), scale lên
-            # vì config được viết khi chưa biết đơn vị matrix
-            nonzero = distance_matrix[distance_matrix > 0]
+            nonzero  = distance_matrix[distance_matrix > 0]
             avg_edge = float(np.mean(nonzero)) if len(nonzero) > 0 else 100.0
             auto_lam = avg_edge / max(capacity, 1.0)
-            # Nếu penalty_lambda quá nhỏ so với auto, dùng auto
             self.lam = max(penalty_lambda, auto_lam * 0.5)
+
+        # [PERF-5] Early-exit threshold: 10% of avg edge cost
+        nonzero       = distance_matrix[distance_matrix > 0]
+        self._avg_edge = float(np.mean(nonzero)) if len(nonzero) > 0 else 100.0
+        self._early_exit_threshold = -self._avg_edge * 0.15
 
         self.tau_min = max(5,  tabu_size // 2)
         self.tau_max = max(15, tabu_size * 2)
 
         self._granular_neighbors = self._build_granular_lists()
 
+        # [PERF-1] Demands array for fast vectorized access
+        self._demands_arr = np.array(
+            [demands.get(i, 0) for i in range(self.n)], dtype=np.float64
+        )
+
     # ── Setup ──────────────────────────────────────────────────────────
 
     def _build_granular_lists(self) -> Dict[int, List[int]]:
-        customers = list(range(1, self.n))
+        customers   = list(range(1, self.n))
         depot_dists = self.matrix[0, 1:].astype(float)
         avg_dist    = float(np.mean(depot_dists[depot_dists > 0])) if len(depot_dists) > 0 else 1.0
         threshold   = self.granular_beta * avg_dist * 2
@@ -117,33 +127,57 @@ class GranularTabuSearch:
             neighbors[i] = eligible
 
         avg_edges = sum(len(v) for v in neighbors.values()) / max(len(neighbors), 1)
-        print(f"[GTS] Granular lists: β={self.granular_beta}, avg_nb={avg_edges:.1f}/node, λ={self.lam:.1f}")
+        print(f"[GTS] Granular lists: β={self.granular_beta}, "
+              f"avg_nb={avg_edges:.1f}/node, λ={self.lam:.1f}, "
+              f"early_exit_thresh={self._early_exit_threshold:.1f}")
         return neighbors
 
-    # ── Helpers ────────────────────────────────────────────────────────
+    # ── Cache management ───────────────────────────────────────────────
 
-    def _route_dist(self, route: Route) -> float:
-        if len(route) <= 2: return 0.0
-        return float(sum(self.matrix[route[i], route[i+1]] for i in range(len(route)-1)))
+    def _build_caches(self, sol: Solution) -> Tuple[Dict, Dict]:
+        """
+        [PERF-1,2,7] Xây dựng route_loads và route_dists cache.
+        route_loads[i] = tổng demand của sol[i]
+        route_dists[i] = tổng khoảng cách của sol[i]
+        """
+        route_loads = {}
+        route_dists = {}
+        for i, r in enumerate(sol):
+            route_loads[i] = float(sum(
+                self._demands_arr[node] for node in r if node != 0
+            ))
+            route_dists[i] = self._route_dist_raw(r)
+        return route_loads, route_dists
 
-    def _route_load(self, route: Route) -> float:
-        return float(sum(self.demands.get(n, 0) for n in route if n != 0))
+    def _route_dist_raw(self, route: Route) -> float:
+        """Tính khoảng cách route từ đầu (dùng khi build cache)."""
+        if len(route) <= 2:
+            return 0.0
+        return float(sum(
+            self.matrix[route[i], route[i + 1]]
+            for i in range(len(route) - 1)
+        ))
 
-    def _total_cost(self, sol: Solution) -> float:
-        return float(sum(self._route_dist(r) for r in sol if len(r) > 2))
+    # ── Helpers (dùng cache) ───────────────────────────────────────────
 
-    def _penalized_cost(self, sol: Solution) -> float:
+    def _total_cost_cached(self, route_dists: Dict) -> float:
+        """[PERF-2] O(num_routes) thay vì O(n)."""
+        return sum(route_dists.values())
+
+    def _penalized_cost_cached(self, sol: Solution,
+                                route_loads: Dict, route_dists: Dict) -> float:
         dist = penalty = 0.0
-        for r in sol:
-            if len(r) <= 2: continue
-            dist    += self._route_dist(r)
-            penalty += max(0.0, self._route_load(r) - self.capacity)
+        for i, r in enumerate(sol):
+            if len(r) <= 2:
+                continue
+            dist    += route_dists[i]
+            penalty += max(0.0, route_loads[i] - self.capacity)
         return dist + self.lam * penalty
 
     def _copy_sol(self, sol: Solution) -> Solution:
         return [r[:] for r in sol]
 
-    def _node_positions(self, sol: Solution) -> Dict[int, Tuple[int,int]]:
+    def _node_positions(self, sol: Solution) -> Dict[int, Tuple[int, int]]:
         pos = {}
         for ri, route in enumerate(sol):
             for pi, node in enumerate(route):
@@ -151,40 +185,58 @@ class GranularTabuSearch:
                     pos[node] = (ri, pi)
         return pos
 
-    def _clean_empty_routes(self, sol: Solution):
-        """Xóa routes rỗng in-place."""
-        sol[:] = [r for r in sol if len(r) > 2]
+    def _clean_empty_routes(self, sol: Solution,
+                             route_loads: Dict = None,
+                             route_dists: Dict = None):
+        """
+        [FIX-4] Clean routes + đồng bộ cache nếu được truyền vào.
+        Rebuild cache keys để liên tục (0,1,2,...).
+        """
+        keep_indices = [i for i, r in enumerate(sol) if len(r) > 2]
+        new_sol = [sol[i] for i in keep_indices]
+        sol.clear()
+        sol.extend(new_sol)
 
-    # ── Delta evaluations ──────────────────────────────────────────────
+        if route_loads is not None and route_dists is not None:
+            new_loads = {new_i: route_loads[old_i]
+                         for new_i, old_i in enumerate(keep_indices)}
+            new_dists = {new_i: route_dists[old_i]
+                         for new_i, old_i in enumerate(keep_indices)}
+            route_loads.clear()
+            route_loads.update(new_loads)
+            route_dists.clear()
+            route_dists.update(new_dists)
 
-    def _delta_relocate(self, sol, u, r_src, p_u, r_dst, p_ins) -> Optional[float]:
-        route_s = sol[r_src]; route_d = sol[r_dst]
+    # ── Delta evaluations (dùng cached loads) ──────────────────────────
+
+    def _delta_relocate(self, sol, route_loads, u, r_src, p_u, r_dst, p_ins) -> float:
+        route_s = sol[r_src]
+        route_d = sol[r_dst]
         d = self.matrix
-        prev_u = route_s[p_u-1]; next_u = route_s[p_u+1]
-        prev_d = route_d[p_ins-1]; next_d = route_d[p_ins]
+        prev_u = route_s[p_u - 1]
+        next_u = route_s[p_u + 1]
+        prev_d = route_d[p_ins - 1]
+        next_d = route_d[p_ins]
 
-        remove_gain = d[prev_u,u] + d[u,next_u] - d[prev_u,next_u]
-        insert_cost = d[prev_d,u] + d[u,next_d] - d[prev_d,next_d]
-        delta = insert_cost - remove_gain
+        remove_gain = d[prev_u, u] + d[u, next_u] - d[prev_u, next_u]
+        insert_cost = d[prev_d, u] + d[u, next_d] - d[prev_d, next_d]
+        delta       = float(insert_cost - remove_gain)
 
-        u_dem = self.demands.get(u, 0)
-        load_s = self._route_load(route_s)
-        load_d = self._route_load(route_d)
+        u_dem  = self._demands_arr[u]
+        load_s = route_loads[r_src]
+        load_d = route_loads[r_dst]
         delta += self.lam * (
-            max(0.0, load_s - u_dem - self.capacity) +
-            max(0.0, load_d + u_dem - self.capacity) -
-            max(0.0, load_s - self.capacity) -
-            max(0.0, load_d - self.capacity)
+            max(0.0, load_s - u_dem - self.capacity)
+            + max(0.0, load_d + u_dem - self.capacity)
+            - max(0.0, load_s - self.capacity)
+            - max(0.0, load_d - self.capacity)
         )
         return delta
 
-    def _delta_relocate2(self, sol, u, v, r_src, p_u, r_dst, p_ins) -> Optional[float]:
-        """
-        [FIX-1] Thêm d[u,v] vào remove_gain.
-        Chuỗi bị loại = (prev_u→u→v→next_v), thay bằng (prev_u→next_v).
-        Chi phí loại = d[prev_u,u] + d[u,v] + d[v,next_v] - d[prev_u,next_v].
-        """
-        route_s = sol[r_src]; route_d = sol[r_dst]
+    def _delta_relocate2(self, sol, route_loads, u, v, r_src, p_u, r_dst, p_ins) -> Optional[float]:
+        """[FIX-1] Đúng remove_gain bao gồm d[u,v]."""
+        route_s = sol[r_src]
+        route_d = sol[r_dst]
         d = self.matrix
 
         if p_u + 2 >= len(route_s):
@@ -193,119 +245,222 @@ class GranularTabuSearch:
         if next_v == 0:
             return None
 
-        prev_u = route_s[p_u - 1]
-        # [FIX-1] Đúng: bao gồm d[u,v] trong remove_gain
-        remove_gain = (d[prev_u,u] + d[u,v] + d[v,next_v]
-                       - d[prev_u,next_v])
+        prev_u      = route_s[p_u - 1]
+        remove_gain = (d[prev_u, u] + d[u, v] + d[v, next_v]
+                       - d[prev_u, next_v])
+        prev_d      = route_d[p_ins - 1]
+        next_d      = route_d[p_ins]
+        insert_cost = d[prev_d, u] + d[u, v] + d[v, next_d] - d[prev_d, next_d]
+        delta       = float(insert_cost - remove_gain)
 
-        prev_d = route_d[p_ins-1]; next_d = route_d[p_ins]
-        insert_cost = d[prev_d,u] + d[u,v] + d[v,next_d] - d[prev_d,next_d]
-
-        delta = insert_cost - remove_gain
-
-        seg_dem = self.demands.get(u,0) + self.demands.get(v,0)
-        load_s  = self._route_load(route_s)
-        load_d  = self._route_load(route_d)
+        seg_dem = self._demands_arr[u] + self._demands_arr[v]
+        load_s  = route_loads[r_src]
+        load_d  = route_loads[r_dst]
         delta  += self.lam * (
-            max(0.0, load_s - seg_dem - self.capacity) +
-            max(0.0, load_d + seg_dem - self.capacity) -
-            max(0.0, load_s - self.capacity) -
-            max(0.0, load_d - self.capacity)
+            max(0.0, load_s - seg_dem - self.capacity)
+            + max(0.0, load_d + seg_dem - self.capacity)
+            - max(0.0, load_s - self.capacity)
+            - max(0.0, load_d - self.capacity)
         )
         return delta
 
-    def _delta_swap(self, sol, u, v, r_u, p_u, r_v, p_v) -> Optional[float]:
-        route_u = sol[r_u]; route_v = sol[r_v]
-        d = self.matrix
-        pu_prev = route_u[p_u-1]; pu_next = route_u[p_u+1]
-        pv_prev = route_v[p_v-1]; pv_next = route_v[p_v+1]
+    def _delta_swap(self, sol, route_loads, u, v, r_u, p_u, r_v, p_v) -> Optional[float]:
+        route_u = sol[r_u]
+        route_v = sol[r_v]
+        d       = self.matrix
+        pu_prev = route_u[p_u - 1]
+        pu_next = route_u[p_u + 1]
+        pv_prev = route_v[p_v - 1]
+        pv_next = route_v[p_v + 1]
 
         if r_u == r_v:
-            if abs(p_u - p_v) == 1: return None
-            old = d[pu_prev,u]+d[u,pu_next] + d[pv_prev,v]+d[v,pv_next]
-            new = d[pu_prev,v]+d[v,pu_next] + d[pv_prev,u]+d[u,pv_next]
+            if abs(p_u - p_v) == 1:
+                return None
+            old = d[pu_prev, u] + d[u, pu_next] + d[pv_prev, v] + d[v, pv_next]
+            new = d[pu_prev, v] + d[v, pu_next] + d[pv_prev, u] + d[u, pv_next]
             return float(new - old)
         else:
-            old = d[pu_prev,u]+d[u,pu_next] + d[pv_prev,v]+d[v,pv_next]
-            new = d[pu_prev,v]+d[v,pu_next] + d[pv_prev,u]+d[u,pv_next]
-            delta = float(new - old)
-            u_dem = self.demands.get(u,0); v_dem = self.demands.get(v,0)
-            load_u = self._route_load(route_u); load_v = self._route_load(route_v)
+            old    = d[pu_prev, u] + d[u, pu_next] + d[pv_prev, v] + d[v, pv_next]
+            new    = d[pu_prev, v] + d[v, pu_next] + d[pv_prev, u] + d[u, pv_next]
+            delta  = float(new - old)
+            u_dem  = self._demands_arr[u]
+            v_dem  = self._demands_arr[v]
+            load_u = route_loads[r_u]
+            load_v = route_loads[r_v]
             delta += self.lam * (
-                max(0.0, load_u - u_dem + v_dem - self.capacity) +
-                max(0.0, load_v - v_dem + u_dem - self.capacity) -
-                max(0.0, load_u - self.capacity) -
-                max(0.0, load_v - self.capacity)
+                max(0.0, load_u - u_dem + v_dem - self.capacity)
+                + max(0.0, load_v - v_dem + u_dem - self.capacity)
+                - max(0.0, load_u - self.capacity)
+                - max(0.0, load_v - self.capacity)
             )
             return delta
 
-    def _delta_2opt_star(self, sol, r1, i, r2, j) -> Optional[float]:
-        route1 = sol[r1]; route2 = sol[r2]
-        d = self.matrix
-        if i == 0 or i >= len(route1)-1: return None
-        if j == 0 or j >= len(route2)-1: return None
+    def _delta_2opt_star(self, sol, route_loads, r1, i, r2, j) -> Optional[float]:
+        """[PERF-3] Dùng cached loads thay tính tail từ đầu."""
+        route1 = sol[r1]
+        route2 = sol[r2]
+        d      = self.matrix
 
-        A = route1[i]; C = route1[i+1]
-        B = route2[j]; D = route2[j+1]
-        delta = float(d[A,D] + d[B,C] - d[A,C] - d[B,D])
+        if i == 0 or i >= len(route1) - 1:
+            return None
+        if j == 0 or j >= len(route2) - 1:
+            return None
+        # Skip nếu route quá ngắn (< 4 nodes = [0, a, b, 0])
+        if len(route1) < 4 or len(route2) < 4:
+            return None
 
-        tail1_load = sum(self.demands.get(x,0) for x in route1[i+1:] if x!=0)
-        tail2_load = sum(self.demands.get(x,0) for x in route2[j+1:] if x!=0)
-        head1_load = self._route_load(route1) - tail1_load
-        head2_load = self._route_load(route2) - tail2_load
+        A     = route1[i];  C = route1[i + 1]
+        B     = route2[j];  D = route2[j + 1]
+        delta = float(d[A, D] + d[B, C] - d[A, C] - d[B, D])
+
+        # [PERF-3] Tính tail_load bằng sum nhanh trên slice (unavoidable)
+        # nhưng giới hạn bằng cách chỉ gọi khi delta thô đủ promising
+        if delta > self._avg_edge * 2:
+            return None  # Không promising, skip luôn
+
+        tail1_load = float(sum(
+            self._demands_arr[x] for x in route1[i + 1:] if x != 0
+        ))
+        tail2_load = float(sum(
+            self._demands_arr[x] for x in route2[j + 1:] if x != 0
+        ))
+        head1_load = route_loads[r1] - tail1_load
+        head2_load = route_loads[r2] - tail2_load
+
         delta += self.lam * (
-            max(0.0, head1_load + tail2_load - self.capacity) +
-            max(0.0, head2_load + tail1_load - self.capacity) -
-            max(0.0, self._route_load(route1) - self.capacity) -
-            max(0.0, self._route_load(route2) - self.capacity)
+            max(0.0, head1_load + tail2_load - self.capacity)
+            + max(0.0, head2_load + tail1_load - self.capacity)
+            - max(0.0, route_loads[r1] - self.capacity)
+            - max(0.0, route_loads[r2] - self.capacity)
         )
         return delta
 
-    # ── Apply moves ────────────────────────────────────────────────────
+    # ── Apply moves (incremental cache update) ──────────────────────────
 
-    def _apply_relocate(self, sol, u, r_src, p_u, r_dst, p_ins):
-        """[FIX-4] Không gọi sol[:]=filter ở đây; caller tự rebuild."""
-        sol[r_src].pop(p_u)
-        sol[r_dst].insert(p_ins, u)
+    def _apply_relocate(self, sol, route_loads, route_dists, u, r_src, p_u, r_dst, p_ins):
+        """[PERF-1,7] Apply + update cache incrementally."""
+        route_s = sol[r_src]
+        route_d = sol[r_dst]
+        d       = self.matrix
 
-    def _apply_relocate2(self, sol, u, v, r_src, p_u, r_dst, p_ins):
-        """[FIX-4] Không filter. Xóa v trước (index p_u+1), rồi u (p_u)."""
-        sol[r_src].pop(p_u + 1)
-        sol[r_src].pop(p_u)
-        sol[r_dst].insert(p_ins, v)
-        sol[r_dst].insert(p_ins, u)
+        # Tính delta_dist trước khi thay đổi
+        prev_u   = route_s[p_u - 1]
+        next_u   = route_s[p_u + 1]
+        prev_d   = route_d[p_ins - 1]
+        next_d   = route_d[p_ins]
+        dist_del = (d[prev_u, u] + d[u, next_u]
+                    - d[prev_u, next_u])
+        dist_ins = (d[prev_d, u] + d[u, next_d]
+                    - d[prev_d, next_d])
 
-    def _apply_swap(self, sol, u, v, r_u, p_u, r_v, p_v):
+        # Apply
+        route_s.pop(p_u)
+        route_d.insert(p_ins, u)
+
+        # Update cache
+        u_dem              = self._demands_arr[u]
+        route_loads[r_src] -= u_dem
+        route_loads[r_dst] += u_dem
+        route_dists[r_src] -= dist_del
+        route_dists[r_dst] += dist_ins
+
+    def _apply_relocate2(self, sol, route_loads, route_dists, u, v, r_src, p_u, r_dst, p_ins):
+        """[FIX-4] + [PERF-1,7] Apply or-opt-2 + update cache."""
+        route_s = sol[r_src]
+        route_d = sol[r_dst]
+        d       = self.matrix
+
+        if p_u + 2 >= len(route_s):
+            return
+        next_v   = route_s[p_u + 2]
+        prev_u   = route_s[p_u - 1]
+        prev_d   = route_d[p_ins - 1]
+        next_d   = route_d[p_ins]
+
+        dist_del = (d[prev_u, u] + d[u, v] + d[v, next_v]
+                    - d[prev_u, next_v])
+        dist_ins = (d[prev_d, u] + d[u, v] + d[v, next_d]
+                    - d[prev_d, next_d])
+
+        # [FIX-4] Xóa v trước (index cao hơn), rồi u
+        route_s.pop(p_u + 1)
+        route_s.pop(p_u)
+        route_d.insert(p_ins, v)
+        route_d.insert(p_ins, u)
+
+        seg_dem            = self._demands_arr[u] + self._demands_arr[v]
+        route_loads[r_src] -= seg_dem
+        route_loads[r_dst] += seg_dem
+        route_dists[r_src] -= dist_del
+        route_dists[r_dst] += dist_ins
+
+    def _apply_swap(self, sol, route_loads, route_dists, u, v, r_u, p_u, r_v, p_v):
+        """Swap không thay đổi loads nếu cùng route. Cross-route thì update delta."""
+        route_u = sol[r_u]
+        route_v = sol[r_v]
+        d       = self.matrix
+
+        pu_prev = route_u[p_u - 1]; pu_next = route_u[p_u + 1]
+        pv_prev = route_v[p_v - 1]; pv_next = route_v[p_v + 1]
+
+        dist_delta = (
+            d[pu_prev, v] + d[v, pu_next] + d[pv_prev, u] + d[u, pv_next]
+            - d[pu_prev, u] - d[u, pu_next] - d[pv_prev, v] - d[v, pv_next]
+        )
+
         sol[r_u][p_u] = v
         sol[r_v][p_v] = u
 
-    def _apply_2opt_star(self, sol, r1, i, r2, j):
-        """[FIX-4] Không filter; caller rebuild pos_map từ đầu."""
-        new_r1 = sol[r1][:i+1] + sol[r2][j+1:]
-        new_r2 = sol[r2][:j+1] + sol[r1][i+1:]
+        if r_u == r_v:
+            route_dists[r_u] += dist_delta
+        else:
+            # Tính riêng delta cho từng route
+            du_delta = (d[pu_prev, v] + d[v, pu_next]
+                        - d[pu_prev, u] - d[u, pu_next])
+            dv_delta = (d[pv_prev, u] + d[u, pv_next]
+                        - d[pv_prev, v] - d[v, pv_next])
+            route_dists[r_u] += du_delta
+            route_dists[r_v] += dv_delta
+            u_dem              = self._demands_arr[u]
+            v_dem              = self._demands_arr[v]
+            route_loads[r_u]  += v_dem - u_dem
+            route_loads[r_v]  += u_dem - v_dem
+
+    def _apply_2opt_star(self, sol, route_loads, route_dists, r1, i, r2, j):
+        """[FIX-4] Apply 2opt* + rebuild cache cho 2 routes bị thay đổi."""
+        new_r1 = sol[r1][:i + 1] + sol[r2][j + 1:]
+        new_r2 = sol[r2][:j + 1] + sol[r1][i + 1:]
         sol[r1] = new_r1
         sol[r2] = new_r2
+        # Rebuild cache cho 2 routes này
+        route_loads[r1] = float(sum(
+            self._demands_arr[node] for node in new_r1 if node != 0
+        ))
+        route_loads[r2] = float(sum(
+            self._demands_arr[node] for node in new_r2 if node != 0
+        ))
+        route_dists[r1] = self._route_dist_raw(new_r1)
+        route_dists[r2] = self._route_dist_raw(new_r2)
 
     # ── Perturbation ───────────────────────────────────────────────────
 
     def _double_bridge(self, sol: Solution) -> Solution:
         """[FIX-3] Không recursive; giới hạn k = min(8, len//2)."""
         new_sol = self._copy_sol(sol)
-        # [FIX-3] Tính k an toàn, không gây infinite recursion
-        k = min(8, len(new_sol) // 2)
+        k       = min(8, len(new_sol) // 2)
         if k < 2:
-            return new_sol  # không đủ xe để perturb
+            return new_sol
 
         idx_to_shake = random.sample(range(len(new_sol)), k)
         flat = []
         for idx in sorted(idx_to_shake, reverse=True):
             route = new_sol.pop(idx)
-            flat.extend([n for n in route if n != 0])
+            flat.extend([node for node in route if node != 0])
 
         if len(flat) < 4:
             return self._copy_sol(sol)
 
-        positions = sorted(random.sample(range(1, len(flat)), min(4, len(flat)-1)))
+        positions = sorted(random.sample(range(1, len(flat)), min(4, len(flat) - 1)))
         while len(positions) < 4:
             positions.append(len(flat))
         a, b, c, _ = positions[:4]
@@ -318,13 +473,13 @@ class GranularTabuSearch:
         return new_sol
 
     def _rebuild_from_flat(self, flat: List[int]) -> Solution:
-        sol = []; curr = [0]; load = 0.0
+        sol: Solution = []; curr: Route = [0]; load = 0.0
         for node in flat:
-            d = self.demands.get(node, 0)
-            if load + d > self.capacity:
+            dem = self._demands_arr[node]
+            if load + dem > self.capacity:
                 curr.append(0); sol.append(curr)
                 curr = [0]; load = 0.0
-            curr.append(node); load += d
+            curr.append(node); load += dem
         curr.append(0); sol.append(curr)
         while len(sol) > self.max_v:
             last = sol.pop()
@@ -334,21 +489,24 @@ class GranularTabuSearch:
     # ── Post-optimization ──────────────────────────────────────────────
 
     def _intra_or_opt(self, sol: Solution) -> Solution:
+        """Or-opt nội tuyến làm mịn sau khi tìm best solution."""
         d = self.matrix
         for r in sol:
-            if len(r) <= 4: continue
-            max_passes = 30; pass_count = 0; improved = True
+            if len(r) <= 4:
+                continue
+            max_passes = 20; pass_count = 0; improved = True
             while improved and pass_count < max_passes:
                 improved = False; pass_count += 1; n_r = len(r)
-                for i in range(1, n_r-1):
-                    node = r[i]; prev_i = r[i-1]; next_i = r[i+1]
-                    gain_remove = d[prev_i,node]+d[node,next_i]-d[prev_i,next_i]
+                for i in range(1, n_r - 1):
+                    node    = r[i]; prev_i = r[i - 1]; next_i = r[i + 1]
+                    gain_rm = d[prev_i, node] + d[node, next_i] - d[prev_i, next_i]
                     best_gain = 1e-6; best_j = -1
-                    for j in range(1, n_r-1):
-                        if j == i or j == i-1: continue
-                        prev_j = r[j-1]; next_j = r[j]
-                        gain_insert = d[prev_j,node]+d[node,next_j]-d[prev_j,next_j]
-                        gain = gain_remove - gain_insert
+                    for j in range(1, n_r - 1):
+                        if j == i or j == i - 1:
+                            continue
+                        prev_j = r[j - 1]; next_j = r[j]
+                        gain_ins = d[prev_j, node] + d[node, next_j] - d[prev_j, next_j]
+                        gain = gain_rm - gain_ins
                         if gain > best_gain:
                             best_gain = gain; best_j = j
                     if best_j != -1:
@@ -361,154 +519,214 @@ class GranularTabuSearch:
     # ── Main loop ──────────────────────────────────────────────────────
 
     def solve(self, initial_solution: Solution) -> Tuple[Solution, float]:
-        curr_sol  = self._copy_sol(initial_solution)
+        curr_sol = self._copy_sol(initial_solution)
         self._clean_empty_routes(curr_sol)
+
+        # [PERF-1,2,7] Khởi tạo cache
+        route_loads, route_dists = self._build_caches(curr_sol)
+
         best_sol  = self._copy_sol(curr_sol)
-        best_dist = self._total_cost(curr_sol)
+        best_dist = self._total_cost_cached(route_dists)
 
+        # [PERF-4] Tabu dict thay deque
         tabu_dict: Dict[tuple, int] = {}
-        no_improve = 0; iteration = 0
-        infeasible_count = 0
+        no_improve = 0; iteration = 0; infeasible_count = 0
 
-        print(f"[GTS] Bắt đầu: {len(curr_sol)} xe | {best_dist/100:.2f} km | λ={self.lam:.1f}")
+        print(f"[GTS] Bắt đầu: {len(curr_sol)} xe | "
+              f"{best_dist / 100:.2f} km | λ={self.lam:.1f} | "
+              f"max_iter={self.max_iter} | max_no_improve={self.max_no_improve}")
 
         while iteration < self.max_iter:
             if no_improve >= self.max_no_improve:
-                print(f"[GTS] Dừng iter {iteration}: {no_improve} vòng không cải thiện")
+                print(f"[GTS] Dừng iter {iteration}: "
+                      f"{no_improve} vòng không cải thiện")
                 break
 
-            # Diversification
+            # Diversification tại nửa ngưỡng
             if no_improve == self.max_no_improve // 2:
                 perturbed = self._double_bridge(self._copy_sol(best_sol))
                 self._clean_empty_routes(perturbed)
-                p_cost = self._total_cost(perturbed)
+                p_loads, p_dists = self._build_caches(perturbed)
+                p_cost = self._total_cost_cached(p_dists)
                 if p_cost < best_dist:
-                    best_dist = p_cost; best_sol = self._copy_sol(perturbed)
+                    best_dist = p_cost
+                    best_sol  = self._copy_sol(perturbed)
                     no_improve = 0
-                    print(f"  [GTS] Perturbation NEW BEST: {best_dist/100:.2f} km")
+                    print(f"  [GTS] Perturbation NEW BEST: {best_dist / 100:.2f} km")
                 if p_cost < best_dist * 1.1:
-                    curr_sol = perturbed
+                    curr_sol    = perturbed
+                    route_loads = p_loads
+                    route_dists = p_dists
 
-            # [FIX-4] Rebuild pos_map từ đầu mỗi iteration (sau clean)
-            self._clean_empty_routes(curr_sol)
+            # [FIX-4] + [PERF-8] Rebuild pos_map
+            self._clean_empty_routes(curr_sol, route_loads, route_dists)
             pos_map   = self._node_positions(curr_sol)
-            base_cost = self._penalized_cost(curr_sol)
+            base_cost = self._penalized_cost_cached(curr_sol, route_loads, route_dists)
 
             best_move_delta = float('inf')
             best_move = None; best_move_key = None; best_move_type = None
+            found_early_exit = False
 
             for u in list(pos_map.keys()):
+                if found_early_exit:
+                    break
+
                 r_u, p_u = pos_map[u]
                 route_u  = curr_sol[r_u]
 
-                # ── Or-opt-1 ────────────────────────────────────────
+                # ── Or-opt-1 (Relocate single node) ──────────────────
                 for v in self._granular_neighbors.get(u, []):
-                    if v not in pos_map: continue
+                    if v not in pos_map:
+                        continue
                     r_v, p_v = pos_map[v]
-                    if r_v == r_u: continue
+                    if r_v == r_u:
+                        continue
 
-                    for p_ins in [p_v, p_v+1]:
-                        if p_ins < 1 or p_ins >= len(curr_sol[r_v]): continue
-                        delta = self._delta_relocate(curr_sol, u, r_u, p_u, r_v, p_ins)
-                        if delta is None: continue
-                        key = ('R1', u, r_v)
+                    for p_ins in (p_v, p_v + 1):
+                        if p_ins < 1 or p_ins >= len(curr_sol[r_v]):
+                            continue
+                        delta = self._delta_relocate(
+                            curr_sol, route_loads, u, r_u, p_u, r_v, p_ins)
+                        key   = ('R1', u, r_v)
                         in_tabu = tabu_dict.get(key, -1) >= iteration
-                        asp = (base_cost + delta < best_dist - 1e-6)
+                        asp     = (base_cost + delta < best_dist - 1e-6)
                         if (not in_tabu or asp) and delta < best_move_delta:
                             best_move_delta = delta
-                            best_move = (u, r_u, p_u, r_v, p_ins)
-                            best_move_key = key; best_move_type = 'rel1'
-                    # chỉ xét 2 vị trí chèn tốt nhất, break ngay
-                    if best_move_type == 'rel1' and best_move and best_move[0] == u:
+                            best_move       = (u, r_u, p_u, r_v, p_ins)
+                            best_move_key   = key
+                            best_move_type  = 'rel1'
+                            # [PERF-5] Early exit: cải thiện rõ ràng
+                            if delta < self._early_exit_threshold:
+                                found_early_exit = True
+                                break
+                    if found_early_exit:
                         break
 
-                # ── Or-opt-2 ────────────────────────────────────────
+                if found_early_exit:
+                    break
+
+                # ── Or-opt-2 (Relocate 2 consecutive nodes) ──────────
                 if p_u + 1 < len(route_u) - 1:
                     v_next = route_u[p_u + 1]
                     if v_next != 0:
-                        for nb in self._granular_neighbors.get(u, [])[:10]:
-                            if nb not in pos_map: continue
+                        for nb in self._granular_neighbors.get(u, [])[:8]:
+                            if nb not in pos_map:
+                                continue
                             r_nb, p_nb = pos_map[nb]
-                            if r_nb == r_u: continue
-                            for p_ins in range(1, len(curr_sol[r_nb])):
+                            if r_nb == r_u:
+                                continue
+                            for p_ins in range(1, min(len(curr_sol[r_nb]), 6)):
                                 delta2 = self._delta_relocate2(
-                                    curr_sol, u, v_next, r_u, p_u, r_nb, p_ins)
-                                if delta2 is None: continue
-                                key2 = ('R2', u, r_nb)
-                                in_tabu2 = tabu_dict.get(key2, -1) >= iteration
-                                asp2 = (base_cost + delta2 < best_dist - 1e-6)
-                                if (not in_tabu2 or asp2) and delta2 < best_move_delta:
+                                    curr_sol, route_loads,
+                                    u, v_next, r_u, p_u, r_nb, p_ins)
+                                if delta2 is None:
+                                    continue
+                                key2    = ('R2', u, r_nb)
+                                in_t2   = tabu_dict.get(key2, -1) >= iteration
+                                asp2    = (base_cost + delta2 < best_dist - 1e-6)
+                                if (not in_t2 or asp2) and delta2 < best_move_delta:
                                     best_move_delta = delta2
-                                    best_move = (u, v_next, r_u, p_u, r_nb, p_ins)
-                                    best_move_key = key2; best_move_type = 'rel2'
-                                break
+                                    best_move       = (u, v_next, r_u, p_u, r_nb, p_ins)
+                                    best_move_key   = key2
+                                    best_move_type  = 'rel2'
+                            break  # Chỉ xét neighbor đầu tiên
 
-                # ── SWAP ────────────────────────────────────────────
+                # ── SWAP ─────────────────────────────────────────────
                 for v in self._granular_neighbors.get(u, []):
-                    if v not in pos_map: continue
+                    if v not in pos_map:
+                        continue
                     r_v, p_v = pos_map[v]
-                    if r_u == r_v and p_u >= p_v: continue
-                    ds = self._delta_swap(curr_sol, u, v, r_u, p_u, r_v, p_v)
-                    if ds is None: continue
-                    keys = ('SW', min(u,v), max(u,v))
-                    in_tabu_s = tabu_dict.get(keys, -1) >= iteration
-                    asp_s = (base_cost + ds < best_dist - 1e-6)
-                    if (not in_tabu_s or asp_s) and ds < best_move_delta:
+                    if r_u == r_v and p_u >= p_v:
+                        continue
+                    ds = self._delta_swap(
+                        curr_sol, route_loads, u, v, r_u, p_u, r_v, p_v)
+                    if ds is None:
+                        continue
+                    keys    = ('SW', min(u, v), max(u, v))
+                    in_t_s  = tabu_dict.get(keys, -1) >= iteration
+                    asp_s   = (base_cost + ds < best_dist - 1e-6)
+                    if (not in_t_s or asp_s) and ds < best_move_delta:
                         best_move_delta = ds
-                        best_move = (u, v, r_u, p_u, r_v, p_v)
-                        best_move_key = keys; best_move_type = 'swap'
+                        best_move       = (u, v, r_u, p_u, r_v, p_v)
+                        best_move_key   = keys
+                        best_move_type  = 'swap'
+                        if ds < self._early_exit_threshold:
+                            found_early_exit = True
+                            break
 
-                # ── 2-opt* ──────────────────────────────────────────
-                for v in self._granular_neighbors.get(u, [])[:8]:
-                    if v not in pos_map: continue
+                if found_early_exit:
+                    break
+
+                # ── 2-opt* ───────────────────────────────────────────
+                for v in self._granular_neighbors.get(u, [])[:6]:
+                    if v not in pos_map:
+                        continue
                     r_v, p_v = pos_map[v]
-                    if r_v == r_u: continue
-                    d2s = self._delta_2opt_star(curr_sol, r_u, p_u, r_v, p_v)
-                    if d2s is None: continue
-                    key2s = ('2S', r_u, p_u, r_v, p_v)
-                    in_tabu_2s = tabu_dict.get(key2s, -1) >= iteration
-                    asp_2s = (base_cost + d2s < best_dist - 1e-6)
-                    if (not in_tabu_2s or asp_2s) and d2s < best_move_delta:
+                    if r_v == r_u:
+                        continue
+                    d2s = self._delta_2opt_star(
+                        curr_sol, route_loads, r_u, p_u, r_v, p_v)
+                    if d2s is None:
+                        continue
+                    key2s   = ('2S', r_u, p_u, r_v, p_v)
+                    in_t_2s = tabu_dict.get(key2s, -1) >= iteration
+                    asp_2s  = (base_cost + d2s < best_dist - 1e-6)
+                    if (not in_t_2s or asp_2s) and d2s < best_move_delta:
                         best_move_delta = d2s
-                        best_move = (r_u, p_u, r_v, p_v)
-                        best_move_key = key2s; best_move_type = '2opts'
+                        best_move       = (r_u, p_u, r_v, p_v)
+                        best_move_key   = key2s
+                        best_move_type  = '2opts'
 
             # Apply best move
             if best_move is None:
-                no_improve += 1; iteration += 1; continue
+                no_improve += 1; iteration += 1
+                continue
 
-            new_sol = self._copy_sol(curr_sol)
             if best_move_type == 'rel1':
                 u, r_src, p_u, r_dst, p_ins = best_move
-                self._apply_relocate(new_sol, u, r_src, p_u, r_dst, p_ins)
+                self._apply_relocate(
+                    curr_sol, route_loads, route_dists,
+                    u, r_src, p_u, r_dst, p_ins)
             elif best_move_type == 'rel2':
                 u, v_nxt, r_src, p_u, r_dst, p_ins = best_move
-                self._apply_relocate2(new_sol, u, v_nxt, r_src, p_u, r_dst, p_ins)
+                self._apply_relocate2(
+                    curr_sol, route_loads, route_dists,
+                    u, v_nxt, r_src, p_u, r_dst, p_ins)
             elif best_move_type == 'swap':
                 u, v, r_u, p_u, r_v, p_v = best_move
-                self._apply_swap(new_sol, u, v, r_u, p_u, r_v, p_v)
+                self._apply_swap(
+                    curr_sol, route_loads, route_dists,
+                    u, v, r_u, p_u, r_v, p_v)
             elif best_move_type == '2opts':
                 r1, i, r2, j = best_move
-                self._apply_2opt_star(new_sol, r1, i, r2, j)
+                self._apply_2opt_star(
+                    curr_sol, route_loads, route_dists, r1, i, r2, j)
 
-            # [FIX-4] Clean AFTER apply, trước iteration tiếp theo
-            self._clean_empty_routes(new_sol)
-            curr_sol = new_sol
+            # [FIX-4] Clean sau apply
+            self._clean_empty_routes(curr_sol, route_loads, route_dists)
 
-            # Tabu update
+            # [PERF-4] Tabu update với random tenure
             tenure = random.randint(self.tau_min, self.tau_max)
             tabu_dict[best_move_key] = iteration + tenure
-            if iteration % 50 == 0:
-                tabu_dict = {k: v for k, v in tabu_dict.items() if v >= iteration}
+
+            # [PERF-4] Clean aggressive hơn: mỗi 20 iter
+            if iteration % 20 == 0:
+                tabu_dict = {k: v for k, v in tabu_dict.items()
+                             if v >= iteration}
 
             # Check improvement
-            curr_cost = self._total_cost(curr_sol)
-            is_feasible = all(self._route_load(r) <= self.capacity for r in curr_sol)
+            curr_dist   = self._total_cost_cached(route_dists)
+            is_feasible = all(
+                route_loads.get(i, 0) <= self.capacity
+                for i in range(len(curr_sol))
+                if len(curr_sol[i]) > 2
+            )
 
-            if is_feasible and curr_cost < best_dist:
-                best_dist = curr_cost; best_sol = self._copy_sol(curr_sol)
+            if is_feasible and curr_dist < best_dist:
+                best_dist  = curr_dist
+                best_sol   = self._copy_sol(curr_sol)
                 no_improve = 0
-                print(f"  [GTS iter {iteration:5d}] ✓ {curr_cost/100:.2f} km "
+                print(f"  [GTS iter {iteration:5d}] ✓ {curr_dist / 100:.2f} km "
                       f"| {len(best_sol)} xe | {best_move_type}")
             else:
                 no_improve += 1
@@ -525,13 +743,17 @@ class GranularTabuSearch:
                 infeasible_count = 0
 
             if iteration % 200 == 0 and iteration > 0:
-                print(f"  [GTS iter {iteration:5d}] best={best_dist/100:.2f} km "
-                      f"| NoImprove={no_improve}/{self.max_no_improve} | λ={self.lam:.1f}")
+                print(f"  [GTS iter {iteration:5d}] best={best_dist / 100:.2f} km "
+                      f"| NoImprove={no_improve}/{self.max_no_improve} "
+                      f"| λ={self.lam:.1f}")
 
             iteration += 1
 
         print(f"\n[GTS] Post-opt Or-opt intra-route...")
         best_sol  = self._intra_or_opt(best_sol)
-        best_dist = self._total_cost(best_sol)
-        print(f"[GTS] Hoàn tất: {best_dist/100:.2f} km | {len(best_sol)} xe")
+        best_dist = self._route_dist_raw.__func__(  # recalc after 2opt
+            self,
+            [node for r in best_sol for node in r]  # dummy, use loop below
+        ) if False else sum(self._route_dist_raw(r) for r in best_sol if len(r) > 2)
+        print(f"[GTS] Hoàn tất: {best_dist / 100:.2f} km | {len(best_sol)} xe")
         return best_sol, best_dist

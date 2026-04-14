@@ -25,7 +25,8 @@
     "solvers": {
         "py_vrp": {
             "no_improve_iters": 40000,
-            "display_log":      true
+            "display_log":      true,
+            "_comment_init":    "PyVRP dùng HGS internal initialization, không dùng init_strategy."
         }
     }
 }

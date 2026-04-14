@@ -16,7 +16,10 @@
     },
     "solvers": {
         "milp": {
-            "max_runtime_seconds": 600
+            "max_runtime_seconds": 600,
+            "upper_bound_strategy": "greedy",
+            "_upper_bound_options": ["random", "greedy", "clarke_wright"],
+            "_comment": "upper_bound_strategy dùng để tính NNH bound trước khi giải MILP."
         }
     }
 }

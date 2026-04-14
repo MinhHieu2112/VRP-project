@@ -24,7 +24,9 @@
         "end_temperature":   1,
         "step":              0.9997,
         "scores":            [10, 5, 2, 0],
-        "decay":             0.8
+        "decay":             0.8,
+        "init_strategy":     "random",
+        "_init_options":     ["random", "greedy", "clarke_wright"]
     },
     "constraints": {
         "_comment": "Alias global_constraints — dùng cho CvrpState.objective() backward-compat.",

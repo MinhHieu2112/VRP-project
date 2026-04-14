@@ -2,6 +2,11 @@
 Algorithms/Tabu/main_tabu.py
 Entry-point cho Granular Tabu Search solver.
 Cải tiến dựa trên Toth & Vigo (2003) và Gendreau et al. (1994).
+
+CHANGES:
+  [CFG-1] Đọc init_strategy từ config_tabu.json['tabu_parameters']['init_strategy']
+          thay vì hardcode "clarke_wright" trong code.
+  [CFG-2] Log rõ strategy đang dùng.
 """
 
 import os
@@ -32,7 +37,7 @@ def verify_coverage(initial_state: list, num_nodes: int):
         print(f"[WARN] {len(missing)} KH chưa được phục vụ sau init!")
     else:
         print(f"[OK] Init: {len(initial_state)} xe, "
-              f"tất cả {num_nodes-1} KH được phục vụ")
+              f"tất cả {num_nodes - 1} KH được phục vụ")
 
 
 def run_tabu():
@@ -40,19 +45,22 @@ def run_tabu():
     config = load_config()
     data   = load_data(config)
 
-    matrix    = data['distance_matrix']
-    capacity  = data['vehicle_capacity']
-    df_locs   = data['df_locations']
+    matrix      = data['distance_matrix']
+    capacity    = data['vehicle_capacity']
+    df_locs     = data['df_locations']
     demands_arr = data['demands']
-    num_nodes = matrix.shape[0]
+    num_nodes   = matrix.shape[0]
 
     demands_dict = {i: int(demands_arr[i]) for i in range(num_nodes)}
-    tabu_p  = config['tabu_parameters']
-    cons    = config['constraints']
+    tabu_p = config['tabu_parameters']
+    cons   = config['constraints']
 
-    # Khởi tạo bằng Clarke-Wright (tốt hơn random cho Tabu)
+    # [CFG-1] Đọc init_strategy từ config, default = "clarke_wright"
+    init_strategy = tabu_p.get('init_strategy', 'clarke_wright')
+    print(f"[Tabu] Khởi tạo nghiệm bằng chiến lược: '{init_strategy}'")
+
     initial_state = init_solution(
-        strategy      = "clarke_wright",
+        strategy      = init_strategy,
         matrix        = matrix,
         num_nodes     = num_nodes,
         capacity      = capacity,
@@ -68,12 +76,12 @@ def run_tabu():
         capacity        = capacity,
         max_v           = cons['max_vehicles'],
         tabu_size       = tabu_p.get('tabu_size',        20),
-        max_iter        = tabu_p.get('max_iterations', 5000),
-        max_no_improve  = tabu_p.get('max_no_improve',  300),
+        max_iter        = tabu_p.get('max_iterations', 3000),
+        max_no_improve  = tabu_p.get('max_no_improve',  400),
         granular_beta   = tabu_p.get('granular_beta',   1.5),
-        granular_k      = tabu_p.get('granular_k',       20),
-        penalty_lambda  = tabu_p.get('penalty_lambda',   1.0),
-        penalty_h       = tabu_p.get('penalty_h',        10),
+        granular_k      = tabu_p.get('granular_k',       15),
+        penalty_lambda  = tabu_p.get('penalty_lambda', None),
+        penalty_h       = tabu_p.get('penalty_h',        20),
     )
 
     start = time.time()

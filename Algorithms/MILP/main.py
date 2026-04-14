@@ -2,10 +2,11 @@
 Algorithms/MILP/main.py
 Entry-point cho MILP solver (PuLP/CBC) — sử dụng pipeline chuẩn hóa.
 
-FIXES:
+CHANGES:
   [FIX-1] Kiểm tra obj_val is None trước khi gọi format_routes / build_result.
   [FIX-2] Giảm limit_nodes mặc định xuống 50 (MTZ không scale với n lớn).
   [FIX-3] In thông báo rõ ràng khi solver không tìm được nghiệm.
+  [CFG-1] Đọc upper_bound_strategy từ config['solvers']['milp']['upper_bound_strategy'].
 """
 
 import os
@@ -29,10 +30,15 @@ def load_config() -> dict:
 
 
 def compute_upper_bound(matrix, demands_dict: dict,
-                        capacity: int, max_vehicles: int) -> float:
+                        capacity: int, max_vehicles: int,
+                        strategy: str = 'greedy') -> float:
+    """
+    [CFG-1] Tính upper bound bằng init_solution() với strategy từ config.
+    """
     num_nodes = matrix.shape[0]
+    print(f"[MILP] Tính upper bound bằng chiến lược: '{strategy}'")
     solution  = init_solution(
-        strategy     = "greedy",
+        strategy     = strategy,
         matrix       = matrix,
         num_nodes    = num_nodes,
         capacity     = capacity,
@@ -41,10 +47,10 @@ def compute_upper_bound(matrix, demands_dict: dict,
         validate     = False,
     )
     ub_units = sum(
-        sum(matrix[r[i], r[i+1]] for i in range(len(r)-1))
+        sum(matrix[r[i], r[i + 1]] for i in range(len(r) - 1))
         for r in solution
     )
-    print(f"[MILP] Upper bound (NNH): {ub_units / KM_SCALE:.2f} km "
+    print(f"[MILP] Upper bound ({strategy}): {ub_units / KM_SCALE:.2f} km "
           f"| {len(solution)} xe")
     return float(ub_units)
 
@@ -76,16 +82,18 @@ def main(limit_nodes):
     max_v     = cons.get('max_vehicles', 200)
     timelimit = milp_cfg.get('max_runtime_seconds', 300)
 
+    # [CFG-1] Đọc upper_bound_strategy
+    ub_strategy = milp_cfg.get('upper_bound_strategy', 'greedy')
+
     print(f"[MILP] {num_nodes} node | {max_v} xe | capacity={capacity} | "
           f"timelimit={timelimit}s")
 
-    # Cảnh báo nếu n quá lớn cho MTZ
     if num_nodes > 80:
         print(f"[MILP][WARN] MTZ formulation có O(n²) ràng buộc. "
               f"n={num_nodes} → {num_nodes**2:,} MTZ constraints. "
               f"Khuyến nghị: limit_nodes ≤ 50 để CBC giải được trong thời gian hợp lý.")
 
-    compute_upper_bound(matrix, demands_dict, capacity, max_v)
+    compute_upper_bound(matrix, demands_dict, capacity, max_v, strategy=ub_strategy)
 
     print("--- Đang giải bằng MILP (PuLP/CBC) ---")
     start = time.time()
@@ -99,7 +107,7 @@ def main(limit_nodes):
 
     print(f"\nTrạng thái solver: {status_str}")
 
-    # [FIX-1] Kiểm tra rõ ràng: không xử lý kết quả khi không có feasible solution
+    # [FIX-1] Kiểm tra rõ ràng
     if obj_val_units is None:
         print(f"[MILP] Không tìm được nghiệm khả thi trong {elapsed:.1f}s.")
         print(f"[MILP] Gợi ý: Giảm limit_nodes (hiện tại={num_nodes}), "
@@ -122,6 +130,4 @@ def main(limit_nodes):
 
 
 if __name__ == "__main__":
-    # [FIX-2] Giảm xuống 50 — MTZ chỉ scale tốt với n nhỏ
-    # Nếu muốn n lớn hơn, hãy dùng PyVRP / OR-Tools / ALNS thay thế
     main(limit_nodes=200)
