@@ -52,7 +52,7 @@ def run_tabu():
 
     # Khởi tạo bằng Clarke-Wright (tốt hơn random cho Tabu)
     initial_state = init_solution(
-        strategy      = "greedy",
+        strategy      = "clarke_wright",
         matrix        = matrix,
         num_nodes     = num_nodes,
         capacity      = capacity,

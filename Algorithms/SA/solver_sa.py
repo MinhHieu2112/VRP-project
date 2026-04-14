@@ -19,7 +19,7 @@ import sys
 import os
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
-from Algorithms.Init_strategies.Init_strategies import greedy_init, _build_demands
+from Algorithms.Init_strategies.Init_strategies import clarke_wright_init, _build_demands
 
 # 1 matrix_int unit = 10m → chia 100 ra km
 KM_SCALE = 100
@@ -64,14 +64,14 @@ class SimulatedAnnealingSolver:
                    for n in route if n != 0)
 
     def initial_solution(self) -> list:
-        sol = greedy_init(
+        sol = clarke_wright_init(
             matrix      = self.dist,
             num_nodes   = self.n,
             capacity    = self.capacity,
             demands_map = self.demands_map  
         )
         init_dist = sum(self.route_cost(r) for r in sol if len(r) > 2)
-        print(f"[SA] Nghiệm ban đầu (random): {len(sol)} xe | "
+        print(f"[SA] Nghiệm ban đầu: {len(sol)} xe | "
               f"{init_dist / KM_SCALE:.2f} km")
         return sol
 
