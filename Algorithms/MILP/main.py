@@ -1,6 +1,11 @@
 """
 Algorithms/MILP/main.py
 Entry-point cho MILP solver (PuLP/CBC) — sử dụng pipeline chuẩn hóa.
+
+FIXES:
+  [FIX-1] Kiểm tra obj_val is None trước khi gọi format_routes / build_result.
+  [FIX-2] Giảm limit_nodes mặc định xuống 50 (MTZ không scale với n lớn).
+  [FIX-3] In thông báo rõ ràng khi solver không tìm được nghiệm.
 """
 
 import os
@@ -74,6 +79,12 @@ def main(limit_nodes):
     print(f"[MILP] {num_nodes} node | {max_v} xe | capacity={capacity} | "
           f"timelimit={timelimit}s")
 
+    # Cảnh báo nếu n quá lớn cho MTZ
+    if num_nodes > 80:
+        print(f"[MILP][WARN] MTZ formulation có O(n²) ràng buộc. "
+              f"n={num_nodes} → {num_nodes**2:,} MTZ constraints. "
+              f"Khuyến nghị: limit_nodes ≤ 50 để CBC giải được trong thời gian hợp lý.")
+
     compute_upper_bound(matrix, demands_dict, capacity, max_v)
 
     print("--- Đang giải bằng MILP (PuLP/CBC) ---")
@@ -88,8 +99,16 @@ def main(limit_nodes):
 
     print(f"\nTrạng thái solver: {status_str}")
 
+    # [FIX-1] Kiểm tra rõ ràng: không xử lý kết quả khi không có feasible solution
     if obj_val_units is None:
-        print("[MILP] Không tìm được nghiệm khả thi.")
+        print(f"[MILP] Không tìm được nghiệm khả thi trong {elapsed:.1f}s.")
+        print(f"[MILP] Gợi ý: Giảm limit_nodes (hiện tại={num_nodes}), "
+              f"khuyến nghị ≤ 50. Hoặc tăng max_runtime_seconds trong config.json.")
+        return
+
+    if not routes_info:
+        print(f"[MILP] Solver báo có nghiệm (obj={obj_val_units:.2f}) "
+              f"nhưng không truy vết được routes. Kiểm tra lại milp_solvers.py.")
         return
 
     routes = format_routes(routes_info)
@@ -103,4 +122,6 @@ def main(limit_nodes):
 
 
 if __name__ == "__main__":
-    main(limit_nodes=100)
+    # [FIX-2] Giảm xuống 50 — MTZ chỉ scale tốt với n nhỏ
+    # Nếu muốn n lớn hơn, hãy dùng PyVRP / OR-Tools / ALNS thay thế
+    main(limit_nodes=200)

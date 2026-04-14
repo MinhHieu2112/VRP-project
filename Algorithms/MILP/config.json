@@ -1,6 +1,6 @@
 {
     "paths": {
-        "distance_matrix": "Data/orsm_matrix.csv",
+        "distance_matrix": "Data/orsm_matrix_500.csv",
         "locations_data":  "Data/locations.csv",
         "output_dir":      "Results"
     },
@@ -16,7 +16,7 @@
     },
     "solvers": {
         "milp": {
-            "max_runtime_seconds": 300
+            "max_runtime_seconds": 600
         }
     }
 }

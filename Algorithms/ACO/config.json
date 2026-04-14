@@ -1,6 +1,6 @@
 {
     "paths": {
-        "distance_matrix": "Data/orsm_matrix_200.csv",
+        "distance_matrix": "Data/orsm_matrix_500.csv",
         "locations_data":  "Data/locations.csv",
         "output_dir":      "Results"
     },
@@ -17,8 +17,8 @@
     "solvers": {
         "aco": {
             "ants_num":         40,
-            "max_iter":         1000,
-            "no_improve_limit": 100,
+            "max_iter":         20000,
+            "no_improve_limit": 1000,
             "alpha":            1.0,
             "beta":             2.0,
             "q0":               0.8,

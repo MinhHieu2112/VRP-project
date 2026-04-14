@@ -1,6 +1,6 @@
 {
     "paths": {
-        "distance_matrix": "Data/orsm_matrix.csv",
+        "distance_matrix": "Data/orsm_matrix_500.csv",
         "locations_data":  "Data/locations.csv",
         "output_dir":      "Results"
     },
@@ -21,7 +21,7 @@
         "max_no_improve":  2000,
         "granular_beta":   1.25,
         "granular_k":      20,
-        "penalty_lambda":  null,
+        "penalty_lambda":  1.0,
         "penalty_h":       50
     },
     "constraints": {

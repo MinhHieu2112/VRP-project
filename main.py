@@ -46,7 +46,7 @@ ALGORITHMS = {
         "cwd":    os.path.join(PROJECT_ROOT, "Algorithms", "Tabu"),
     },
     7: {
-        "name":   "MILP (Mixed Integer Linear Programming) [≤350 điểm]",
+        "name":   "MILP (Mixed Integer Linear Programming) [≤200 điểm]",
         "script": os.path.join(PROJECT_ROOT, "Algorithms", "MILP",   "main.py"),
         "cwd":    os.path.join(PROJECT_ROOT, "Algorithms", "MILP"),
     },
