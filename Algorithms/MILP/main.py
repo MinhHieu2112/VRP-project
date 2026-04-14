@@ -32,7 +32,7 @@ def compute_upper_bound(matrix, demands_dict: dict,
                         capacity: int, max_vehicles: int) -> float:
     num_nodes = matrix.shape[0]
     solution  = init_solution(
-        strategy     = "random",
+        strategy     = "greedy",
         matrix       = matrix,
         num_nodes    = num_nodes,
         capacity     = capacity,

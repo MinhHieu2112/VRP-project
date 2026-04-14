@@ -78,7 +78,7 @@ def build_initial_state(data: dict, config: dict) -> CvrpState:
     constraints  = config.get('global_constraints', config.get('constraints', {}))
 
     routes = init_solution(
-        strategy       = "random",
+        strategy       = "greedy",
         matrix         = matrix,
         num_nodes      = num_nodes,
         capacity       = capacity,

@@ -1,6 +1,6 @@
 {
     "paths": {
-        "distance_matrix": "Data/orsm_matrix_500.csv",
+        "distance_matrix": "Data/orsm_matrix_1000.csv",
         "locations_data":  "Data/locations.csv",
         "output_dir":      "Results"
     },
@@ -24,7 +24,7 @@
             "q0":               0.8,
             "rho":              0.1,
             "xi":               0.01,
-            "seed_strategy":    "random",
+            "seed_strategy":    "greedy",
             "seed_weight":      1.1
         }
     }

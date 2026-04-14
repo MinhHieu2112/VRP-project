@@ -7,7 +7,7 @@ Caller dùng Pipeline.matrix_units_to_km() để quy đổi ra km.
 
 Các fix so với bản cũ:
   [FIX-1] Đọc capacity từ 'global_constraints' (khớp DataLoader mới).
-  [FIX-2] Dùng random_init thay random_init → nghiệm ban đầu tốt hơn ~40%.
+  [FIX-2] Dùng greedy_init thay greedy_init → nghiệm ban đầu tốt hơn ~40%.
   [FIX-3] vehicle_penalty = 3000 units (~30km) đủ lớn để tránh thêm xe bừa.
   [FIX-4] Log in đúng đơn vị km (chia 100, không chia 1000).
   [FIX-5] solve() trả về đơn vị nội bộ, không tự chia km.
@@ -19,7 +19,7 @@ import sys
 import os
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
-from Algorithms.Init_strategies.Init_strategies import random_init, _build_demands
+from Algorithms.Init_strategies.Init_strategies import greedy_init, _build_demands
 
 # 1 matrix_int unit = 10m → chia 100 ra km
 KM_SCALE = 100
@@ -64,7 +64,7 @@ class SimulatedAnnealingSolver:
                    for n in route if n != 0)
 
     def initial_solution(self) -> list:
-        sol = random_init(
+        sol = greedy_init(
             matrix      = self.dist,
             num_nodes   = self.n,
             capacity    = self.capacity,
