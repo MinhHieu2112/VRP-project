@@ -1,6 +1,6 @@
 {
     "paths": {
-        "distance_matrix": "Data/orsm_matrix_500.csv",
+        "distance_matrix": "Data/orsm_matrix.csv",
         "locations_data":  "Data/locations.csv",
         "output_dir":      "Results"
     },
@@ -19,12 +19,12 @@
     },
     "sa_parameters": {
         "_comment": "SA đọc block này. Đơn vị nội bộ (KM_SCALE=100).",
-        "start_temperature": 5000,
-        "end_temperature":   0.1,
+        "start_temperature": 3000,
+        "end_temperature":   0.001,
         "step":              0.9997,
         "max_no_improve":    20000,
-        "iter_per_temp":     500,
-        "init_strategy":     "clarke_wright",
+        "iter_per_temp":     1000,
+        "init_strategy":     "random",
         "_init_options":     ["random", "greedy", "clarke_wright"]
     },
     "constraints": {

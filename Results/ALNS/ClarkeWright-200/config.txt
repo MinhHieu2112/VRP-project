@@ -1,0 +1,39 @@
+{
+    "paths": {
+        "distance_matrix": "Data/orsm_matrix_200.csv",
+        "locations_data":  "Data/locations.csv",
+        "output_dir":      "Results"
+    },
+    "global_constraints": {
+        "max_vehicles":         200,
+        "vehicle_capacity":     10,
+        "default_demand":       1,
+        "penalty_unassigned":   100000,
+        "penalty_vehicle_over": 50000
+    },
+    "visualization": {
+        "osrm_url":     "http://localhost:5001",
+        "use_osrm":     true,
+        "map_filename": "route_map.html",
+        "zoom_start":   13
+    },
+    "alns_parameters": {
+        "_comment": "Temperature đơn vị nội bộ (1 unit=10m, KM_SCALE=100).",
+        "max_no_improve":    15000,
+        "start_temperature": 5000,
+        "end_temperature":   1,
+        "step":              0.9997,
+        "scores":            [10, 5, 2, 0],
+        "decay":             0.7,
+        "init_strategy":     "clarke_wright",
+        "_init_options":     ["random", "greedy", "clarke_wright"]
+    },
+    "constraints": {
+        "_comment": "Alias global_constraints — dùng cho CvrpState.objective() backward-compat.",
+        "max_vehicles":         200,
+        "vehicle_capacity":     10,
+        "default_demand":       1,
+        "penalty_unassigned":   100000,
+        "penalty_vehicle_over": 50000
+    }
+}

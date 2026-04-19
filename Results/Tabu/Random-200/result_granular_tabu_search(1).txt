@@ -1,7 +1,7 @@
 ==================================================
   BÁO CÁO KẾT QUẢ: GRANULAR TABU SEARCH
 ==================================================
-Tổng quãng đường:     118.24 km
+Tổng quãng đường:     118.39 km
 Thời gian chạy:       449.06 s
 Số xe sử dụng:        20
 Số khách hàng:        199
