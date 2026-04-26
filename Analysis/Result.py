@@ -46,7 +46,7 @@ def process_all_results(results_dir_pattern, matrix_file_path):
 
 # --- CẤU HÌNH ĐƯỜNG DẪN ---
 # Dấu ** giúp tìm trong tất cả thư mục con (recursive)
-PATTERN = '../Results/ACO/ClarkeWright-1600/*.txt'  
+PATTERN = '../Results/or_tools/PCI-1600/*.txt'  
 MATRIX_PATH = '../Data/orsm_matrix.csv'
 
 # Chạy lệnh

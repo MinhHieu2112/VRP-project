@@ -1,6 +1,6 @@
 {
     "paths": {
-        "distance_matrix": "Data/orsm_matrix_1000.csv",
+        "distance_matrix": "Data/orsm_matrix_500.csv",
         "locations_data":  "Data/locations.csv",
         "output_dir":      "Results"
     },
@@ -19,13 +19,13 @@
     },
     "alns_parameters": {
         "_comment": "Temperature đơn vị nội bộ (1 unit=10m, KM_SCALE=100).",
-        "max_no_improve":    1000,
-        "start_temperature": 2000,
-        "end_temperature":   0.001,
-        "step":              0.9995,
+        "max_no_improve":    4000,
+        "start_temperature": 500,
+        "end_temperature":   1,
+        "step":              0.9997,
         "scores":            [10, 5, 2, 0],
         "decay":             0.7,
-        "init_strategy":     "random",
+        "init_strategy":     "clarke_wright",
         "_init_options":     ["random", "greedy", "clarke_wright"]
     },
     "constraints": {

@@ -1,6 +1,6 @@
 {
     "paths": {
-        "distance_matrix": "Data/orsm_matrix.csv",
+        "distance_matrix": "Data/orsm_matrix_1000.csv",
         "locations_data":  "Data/locations.csv",
         "output_dir":      "Results"
     },
@@ -16,15 +16,15 @@
     },
     "solvers": {
         "aco": {
-            "ants_num":         20,
-            "max_iter":         10000,
-            "no_improve_limit": 1500,  
+            "ants_num":         15,
+            "max_iter":         5000,
+            "no_improve_limit": 800,  
             "alpha":            1.0,
-            "beta":             4.0,   
-            "q0":               0.85,  
+            "beta":             3.0,   
+            "q0":               0.8,  
             "rho":              0.1,
             "xi":               0.1,   
-            "seed_strategy":    "clarke_wright",
+            "seed_strategy":    "greedy",
             "seed_weight":      1.3
         }
     }

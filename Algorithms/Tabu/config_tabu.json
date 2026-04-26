@@ -24,7 +24,7 @@
         "granular_k":      10,
         "penalty_lambda":  1.0,
         "penalty_h":       20,
-        "init_strategy":   "greedy",
+        "init_strategy":   "random",
         "_init_options":   ["random", "greedy", "clarke_wright"]
     },
     "constraints": {

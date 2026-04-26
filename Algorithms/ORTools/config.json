@@ -24,13 +24,13 @@
     },
     "solvers": {
         "or_tools": {
-            "first_solution_strategy":    "PATH_CHEAPEST_ARC",
+            "first_solution_strategy":    "PARALLEL_CHEAPEST_INSERTION",
             "_first_solution_options":    ["PATH_CHEAPEST_ARC", "SAVINGS", "CHRISTOFIDES", "PARALLEL_CHEAPEST_INSERTION"],
             "local_search_metaheuristic": "GUIDED_LOCAL_SEARCH",
             "no_improve_iters":           200,
-            "time_limit":                 200,
+            "time_limit":                 300,
             "lns_time_per_step_seconds":  1,
-            "log_search":                 false
+            "log_search":                 true
         }
     }
 }
