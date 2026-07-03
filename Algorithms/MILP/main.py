@@ -1,14 +1,4 @@
-"""
-Algorithms/MILP/main.py
-Entry-point cho MILP solver (PuLP/CBC) — sử dụng pipeline chuẩn hóa.
-
-CHANGES:
-  [FIX-1] Kiểm tra obj_val is None trước khi gọi format_routes / build_result.
-  [FIX-2] Giảm limit_nodes mặc định xuống 50 (MTZ không scale với n lớn).
-  [FIX-3] In thông báo rõ ràng khi solver không tìm được nghiệm.
-  [CFG-1] Đọc upper_bound_strategy từ config['solvers']['milp']['upper_bound_strategy'].
-"""
-
+# File chạy chính cho thuật toán MILP (Mixed-Integer Linear Programming) giải bài toán VRP.
 import os
 import sys
 import json
@@ -24,38 +14,24 @@ from Utils.Pipeline import load_data, build_result, save_result, visualize, KM_S
 
 
 def load_config() -> dict:
+    # Đọc thông tin cấu hình của MILP từ tệp config.json.
     path = os.path.join(CURRENT_DIR, 'config.json')
     with open(path, 'r', encoding='utf-8') as f:
         return json.load(f)
 
 
-def compute_upper_bound(matrix, demands_dict: dict,
-                        capacity: int, max_vehicles: int,
-                        strategy: str = 'greedy') -> float:
-    """
-    [CFG-1] Tính upper bound bằng init_solution() với strategy từ config.
-    """
+def compute_upper_bound(matrix, demands_dict: dict, capacity: int, max_vehicles: int, strategy: str = 'greedy') -> float:
+    # Tính giới hạn trên cho hàm mục tiêu để định hướng solver MILP.
     num_nodes = matrix.shape[0]
     print(f"[MILP] Tính upper bound bằng chiến lược: '{strategy}'")
-    solution  = init_solution(
-        strategy     = strategy,
-        matrix       = matrix,
-        num_nodes    = num_nodes,
-        capacity     = capacity,
-        demands      = demands_dict,
-        max_vehicles = max_vehicles,
-        validate     = False,
-    )
-    ub_units = sum(
-        sum(matrix[r[i], r[i + 1]] for i in range(len(r) - 1))
-        for r in solution
-    )
-    print(f"[MILP] Upper bound ({strategy}): {ub_units / KM_SCALE:.2f} km "
-          f"| {len(solution)} xe")
+    solution = init_solution(strategy=strategy, matrix=matrix, num_nodes=num_nodes, capacity=capacity, demands=demands_dict, max_vehicles=max_vehicles, validate=False)
+    ub_units = sum(sum(matrix[r[i], r[i + 1]] for i in range(len(r) - 1)) for r in solution)
+    print(f"[MILP] Upper bound ({strategy}): {ub_units / KM_SCALE:.2f} km | {len(solution)} xe")
     return float(ub_units)
 
 
 def format_routes(routes_info: list) -> dict:
+    # Chuyển đổi thông tin tuyến đường từ MILP sang định dạng dict chuẩn.
     routes = {}
     for idx, info in enumerate(routes_info):
         route = info['route']
@@ -66,6 +42,7 @@ def format_routes(routes_info: list) -> dict:
 
 
 def main(limit_nodes):
+    # Điều phối quy trình giải MILP từ nạp dữ liệu, tối ưu hóa đến lưu kết quả.
     config = load_config()
     data   = load_data(config)
 
@@ -76,47 +53,31 @@ def main(limit_nodes):
     num_nodes   = matrix.shape[0]
 
     demands_dict = {i: int(demands_arr[i]) for i in range(num_nodes)}
-
     cons      = config.get('global_constraints', {})
     milp_cfg  = config.get('solvers', {}).get('milp', {})
     max_v     = cons.get('max_vehicles', 200)
     timelimit = milp_cfg.get('max_runtime_seconds', 300)
-
-    # [CFG-1] Đọc upper_bound_strategy
     ub_strategy = milp_cfg.get('upper_bound_strategy', 'greedy')
 
-    print(f"[MILP] {num_nodes} node | {max_v} xe | capacity={capacity} | "
-          f"timelimit={timelimit}s")
-
+    print(f"[MILP] {num_nodes} node | {max_v} xe | capacity={capacity} | timelimit={timelimit}s")
     if num_nodes > 80:
-        print(f"[MILP][WARN] MTZ formulation có O(n²) ràng buộc. "
-              f"n={num_nodes} → {num_nodes**2:,} MTZ constraints. "
-              f"Khuyến nghị: limit_nodes ≤ 50 để CBC giải được trong thời gian hợp lý.")
+        print(f"[MILP][WARN] MTZ formulation có O(n²) ràng buộc. n={num_nodes} → {num_nodes**2:,} MTZ constraints.")
 
     compute_upper_bound(matrix, demands_dict, capacity, max_v, strategy=ub_strategy)
 
     print("--- Đang giải bằng MILP (PuLP/CBC) ---")
     start = time.time()
-    status_str, obj_val_units, routes_info = solve_acvrp_milp(
-        matrix, demands_dict,
-        num_vehicles = max_v,
-        capacity     = capacity,
-        timelimit    = timelimit,
-    )
+    status_str, obj_val_units, routes_info = solve_acvrp_milp(matrix, demands_dict, num_vehicles=max_v, capacity=capacity, timelimit=timelimit)
     elapsed = time.time() - start
 
     print(f"\nTrạng thái solver: {status_str}")
 
-    # [FIX-1] Kiểm tra rõ ràng
     if obj_val_units is None:
         print(f"[MILP] Không tìm được nghiệm khả thi trong {elapsed:.1f}s.")
-        print(f"[MILP] Gợi ý: Giảm limit_nodes (hiện tại={num_nodes}), "
-              f"khuyến nghị ≤ 50. Hoặc tăng max_runtime_seconds trong config.json.")
         return
 
     if not routes_info:
-        print(f"[MILP] Solver báo có nghiệm (obj={obj_val_units:.2f}) "
-              f"nhưng không truy vết được routes. Kiểm tra lại milp_solvers.py.")
+        print(f"[MILP] Solver báo có nghiệm nhưng không truy vết được routes.")
         return
 
     routes = format_routes(routes_info)
@@ -125,8 +86,7 @@ def main(limit_nodes):
     save_result(result, config, "MILP")
     visualize(result, config, "MILP", df_locs)
 
-    print(f"\n[MILP DONE] {result['total_distance_km']:.2f} km | "
-          f"{result['num_vehicles']} xe | {elapsed:.2f}s")
+    print(f"\n[MILP DONE] {result['total_distance_km']:.2f} km | {result['num_vehicles']} xe | {elapsed:.2f}s")
 
 
 if __name__ == "__main__":

@@ -3,7 +3,6 @@ import pandas as pd
 from pathlib import Path
 import logging
 
-# Cấu hình Logging chuyên nghiệp
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -15,7 +14,7 @@ class MatrixCleaner:
         self.eps = 1e-6
 
     def load_data(self):
-        logger.info("📂 Đang tải dữ liệu...")
+        logger.info("Đang tải dữ liệu...")
         # Dùng numpy để load ma trận nhanh hơn pandas
         self.D = np.genfromtxt(self.matrix_path, delimiter=',')
         df_loc = pd.read_csv(self.loc_path)

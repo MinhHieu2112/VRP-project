@@ -1,53 +1,19 @@
-"""
-Algorithms/Init_strategies/Init_strategies.py
-=============================================
-Chiến lược khởi tạo nghiệm ban đầu dùng chung cho ACO, SA, Tabu, ALNS, MILP.
-
-Quy ước đơn vị:
-    - matrix: đơn vị NỘI BỘ (matrix_int = round(OSRM_meters / 10))
-    - 1 unit nội bộ = 10 mét
-    - Để ra km: total_units / KM_SCALE  (KM_SCALE = 100)
-
-FIXES:
-    [FIX-UNIT]   Log in đúng đơn vị: "X units (Y km)" thay vì "Xm (Y km)" sai.
-                 Trước đây in cost/1000 dưới label "km" → sai 10×.
-                 Đúng: cost/100 = km  (vì 1 unit = 10m, 1 km = 1000m → /100).
-
-    [FIX-GREEDY] greedy_init vectorized với numpy:
-                 Trước đây dùng vòng lặp Python O(remaining) cho mỗi bước.
-                 Fix: dùng masked numpy array để tìm nearest neighbor nhanh hơn.
-                 Với 1600 điểm, speedup ~3-5× so với Python loop thuần.
-
-    [FIX-DEMAND] init_solution() đã build demands_map rồi mới gọi fn(),
-                 nhưng các fn() lại gọi _build_demands() lần nữa → double process.
-                 Fix: truyền thẳng demands_map đã build vào fn(), không rebuild.
-"""
-
+# File định nghĩa các chiến lược khởi tạo nghiệm ban đầu (Random, Greedy, Clarke-Wright) cho VRP.
 from __future__ import annotations
 
 import random
 import numpy as np
 from typing import Dict, List, Optional, Tuple
+from Utils.vrp_utils import merge_excess_routes_safe, validate_solution
 
-# Hệ số chuyển đổi đơn vị nội bộ → km (phải nhất quán với DataLoader.KM_SCALE)
-KM_SCALE = 100  # 1 km = 100 units (vì 1 unit = 10m)
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Kiểu dữ liệu
-# ──────────────────────────────────────────────────────────────────────────────
-
-Route    = List[int]    # [0, c1, c2, ..., 0]
-Solution = List[Route]  # danh sách tất cả các route
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Hàm tiện ích nội bộ
-# ──────────────────────────────────────────────────────────────────────────────
+KM_SCALE = 100
+Route    = List[int]
+Solution = List[Route]
 
 def _build_demands(num_nodes: int,
                    demands: Optional[Dict[int, float]],
                    default_demand: float = 1.0) -> Dict[int, float]:
-    """Chuẩn hóa dict demands; depot luôn = 0, khách thiếu dùng default."""
+    # Chuẩn hóa dict demands đảm bảo depot = 0 và các khách hàng thiếu dùng default.
     if demands is None:
         return {i: (0.0 if i == 0 else default_demand)
                 for i in range(num_nodes)}
@@ -57,67 +23,17 @@ def _build_demands(num_nodes: int,
 
 
 def _route_cost(route: Route, matrix: np.ndarray) -> float:
-    """Tổng chi phí (đơn vị nội bộ) của một route."""
+    # Tính tổng khoảng cách nội bộ của một tuyến đường.
     return float(sum(matrix[route[i], route[i + 1]]
                      for i in range(len(route) - 1)))
 
 
 def _close_and_open(solution: Solution, current_route: Route) -> Route:
-    """Đóng route hiện tại, đẩy vào solution, trả về route mới."""
+    # Đóng tuyến đường hiện tại và mở tuyến đường mới.
     current_route.append(0)
     solution.append(current_route)
     return [0]
 
-
-def _merge_excess_routes(solution: Solution, max_vehicles: int) -> Solution:
-    """
-    Gộp route cuối vào route kề nếu số xe vượt max_vehicles.
-    Không kiểm tra capacity khi gộp — thuật toán tối ưu xử lý sau.
-    """
-    while len(solution) > max_vehicles:
-        last = solution.pop()
-        solution[-1] = solution[-1][:-1] + last[1:]
-    return solution
-
-
-def _validate_solution(solution: Solution,
-                        num_nodes: int,
-                        demands: Dict[int, float],
-                        capacity: float) -> Tuple[bool, List[str]]:
-    """
-    Kiểm tra tính hợp lệ: mỗi khách thăm đúng 1 lần, không vượt capacity,
-    mỗi route bắt đầu và kết thúc tại depot.
-    """
-    errors:  List[str]      = []
-    visited: Dict[int, int] = {}
-
-    for idx, route in enumerate(solution):
-        if not route or route[0] != 0 or route[-1] != 0:
-            errors.append(f"Route {idx} không bắt đầu/kết thúc tại depot: {route}")
-        load = sum(demands.get(n, 0.0) for n in route if n != 0)
-        if load > capacity:
-            errors.append(f"Route {idx} vượt capacity: {load:.0f} > {capacity:.0f}")
-        for node in route:
-            if node != 0:
-                visited[node] = visited.get(node, 0) + 1
-
-    missing    = set(range(1, num_nodes)) - set(visited)
-    duplicates = {n: c for n, c in visited.items() if c > 1}
-    if missing:
-        errors.append(
-            f"{len(missing)} khách chưa được phục vụ: "
-            f"{sorted(missing)[:10]}{'...' if len(missing) > 10 else ''}")
-    if duplicates:
-        errors.append(
-            f"{len(duplicates)} khách bị thăm nhiều lần: "
-            f"{list(duplicates.items())[:5]}")
-
-    return (len(errors) == 0), errors
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Chiến lược 1: RANDOM
-# ──────────────────────────────────────────────────────────────────────────────
 
 def random_init(matrix: np.ndarray,
                 num_nodes: int,
@@ -125,12 +41,7 @@ def random_init(matrix: np.ndarray,
                 demands_map: Dict[int, float],
                 max_vehicles: int = 200,
                 seed: Optional[int] = None) -> Solution:
-    """
-    Khởi tạo NGẪU NHIÊN — xáo trộn thứ tự khách, nhét theo capacity.
-
-    Dùng cho: SA, Tabu (khám phá không gian rộng), ALNS (diversification).
-    Độ phức tạp: O(n).
-    """
+    # Khởi tạo nghiệm ngẫu nhiên bằng cách xáo trộn thứ tự khách hàng và phân xe theo tải trọng.
     rng       = random.Random(seed)
     customers = list(range(1, num_nodes))
     rng.shuffle(customers)
@@ -151,33 +62,17 @@ def random_init(matrix: np.ndarray,
         current_route.append(0)
         solution.append(current_route)
 
-    return _merge_excess_routes(solution, max_vehicles)
+    # [DRY-FIX] Dùng hàm util chung — có kiểm tra capacity khi gộp
+    return merge_excess_routes_safe(solution, max_vehicles, demands_map, capacity)
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Chiến lược 2: GREEDY (Nearest Neighbor Heuristic) — Vectorized
-# ──────────────────────────────────────────────────────────────────────────────
 
 def greedy_init(matrix: np.ndarray,
                 num_nodes: int,
                 capacity: float,
                 demands_map: Dict[int, float],
                 max_vehicles: int = 200) -> Solution:
-    """
-    Khởi tạo THAM LAM — Nearest Neighbor Heuristic (NNH) vectorized.
+    # Khởi tạo nghiệm tham lam bằng heuristic láng giềng gần nhất được vector hóa.
 
-    Từ depot, mỗi bước chọn khách chưa thăm GẦN NHẤT còn vừa capacity.
-    Khi không còn ai vừa → về depot, mở xe mới.
-
-    [FIX-GREEDY] Vectorized với numpy mask thay Python loop:
-    - demands_arr: array nhanh hơn dict lookup
-    - Tại mỗi bước: mask = unvisited AND feasible, sau đó argmin trên row
-    - Tránh vòng lặp Python O(remaining) → numpy O(remaining) với C backend
-    - Speedup ~3-5× trên bài toán 1600 điểm
-
-    Dùng cho: ACO seed pheromone, SA/Tabu khởi tạo tốt.
-    Độ phức tạp: O(n²) nhưng với constant nhỏ hơn nhờ numpy.
-    """
     # Chuyển demands sang numpy array để vectorized
     demands_arr = np.array([demands_map.get(i, 0.0) for i in range(num_nodes)],
                            dtype=np.float64)
@@ -228,33 +123,13 @@ def greedy_init(matrix: np.ndarray,
     return solution
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Chiến lược 3: CLARKE-WRIGHT SAVINGS
-# ──────────────────────────────────────────────────────────────────────────────
-
 def clarke_wright_init(matrix: np.ndarray,
                         num_nodes: int,
                         capacity: float,
                         demands_map: Dict[int, float],
                         max_vehicles: int = 200) -> Solution:
-    """
-    Khởi tạo CLARKE-WRIGHT SAVINGS cho ACVRP (bất đối xứng).
+    # Khởi tạo nghiệm bằng thuật toán Clarke-Wright Savings hợp nhất các tuyến theo mức tiết kiệm.
 
-    Tính savings s(i,j) = d(0,i) + d(j,0) - d(i,j) cho mọi cặp có hướng (i→j).
-    Với ACVRP: s(i,j) ≠ s(j,i) vì d(i,j) ≠ d(j,i) và d(0,i) ≠ d(0,j).
-
-    [FIX-ACVRP] Phiên bản cũ dùng `if i >= j: continue` → chỉ tính upper triangle,
-    bỏ qua chiều ngược j→i. Điều này đúng với CVRP đối xứng nhưng SAI với ACVRP:
-      - s(i,j) = d(0,i) + d(j,0) - d(i,j)   ← tiết kiệm khi gộp: ...-i-j-...
-      - s(j,i) = d(0,j) + d(i,0) - d(j,i)   ← tiết kiệm khi gộp: ...-j-i-...
-    Hai giá trị này khác nhau do tính bất đối xứng của OSRM.
-
-    Fix: bỏ điều kiện `i >= j`, tính đủ n*(n-1) cặp có hướng.
-    Merger rule vẫn như cũ: i phải là cuối route A, j phải là đầu route B,
-    tức là gộp [0,...,i,0] + [0,j,...,0] → [0,...,i,j,...,0].
-
-    Độ phức tạp: O(n² log n) cho sorting savings.
-    """
     customers  = list(range(1, num_nodes))
     depot_dist = matrix[0].astype(np.float64)    # d(depot → i) = d(0, i)
     back_dist  = matrix[:, 0].astype(np.float64) # d(i → depot) = d(i, 0)
@@ -264,14 +139,6 @@ def clarke_wright_init(matrix: np.ndarray,
     loads:         Dict[int, float] = {i: float(demands_map[i]) for i in customers}
     node_to_route: Dict[int, int]   = {i: i for i in customers}
 
-    # [FIX-ACVRP] Tính savings theo ĐỦ hai chiều: n*(n-1) cặp có hướng
-    # s(i,j) = d(0,i) + d(j,0) - d(i,j)
-    # Ý nghĩa: nếu gộp route kết thúc bằng i với route bắt đầu bằng j,
-    # tiết kiệm được đoạn "về depot từ i" + "xuất phát depot đến j",
-    # thay bằng đoạn "đi thẳng i→j".
-    #
-    # Cũ (CVRP): if i >= j: continue  → chỉ n*(n-1)/2 cặp, bỏ chiều j→i
-    # Mới (ACVRP): không có điều kiện lọc → đủ n*(n-1) cặp có hướng
     savings: List[Tuple[float, int, int]] = []
     for i in customers:
         for j in customers:
@@ -294,10 +161,6 @@ def clarke_wright_init(matrix: np.ndarray,
         route_i = routes[ri]
         route_j = routes[rj]
 
-        # Merger rule (không đổi):
-        # i phải là node CUỐI route_i (vị trí [-2], trước depot kết thúc)
-        # j phải là node ĐẦU route_j (vị trí [1], sau depot xuất phát)
-        # → Gộp: [0,...,i,0] + [0,j,...,0] → [0,...,i,j,...,0]
         if route_i[-2] != i or route_j[1] != j:
             continue
         if loads[ri] + loads[rj] > capacity:
@@ -315,12 +178,9 @@ def clarke_wright_init(matrix: np.ndarray,
                 node_to_route[node] = ri
 
     solution = list(routes.values())
-    return _merge_excess_routes(solution, max_vehicles)
+    # [DRY-FIX] Dùng hàm util chung — có kiểm tra capacity khi gộp
+    return merge_excess_routes_safe(solution, max_vehicles, demands_map, capacity)
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Factory — entry-point thống nhất
-# ──────────────────────────────────────────────────────────────────────────────
 
 STRATEGY_MAP = {
     "random":        random_init,
@@ -338,42 +198,28 @@ def init_solution(strategy: str,
                   max_vehicles: int = 9999,
                   seed: Optional[int] = None,
                   validate: bool = True) -> Solution:
-    """
-    Entry-point thống nhất: khởi tạo nghiệm theo chiến lược chọn.
-
-    Parameters
-    ----------
-    strategy       : 'random' | 'greedy' | 'clarke_wright'
-    matrix         : Ma trận khoảng cách (đơn vị nội bộ, shape [N, N])
-    num_nodes      : Tổng số node (1 depot + N-1 khách hàng)
-    capacity       : Sức chứa mỗi xe
-    demands        : Dict {node_id: demand} hoặc None → dùng default_demand
-    default_demand : Demand mặc định khi demands=None
-    max_vehicles   : Số xe tối đa
-    seed           : Seed ngẫu nhiên (chỉ dùng cho 'random')
-    validate       : In thông tin và cảnh báo sau khi khởi tạo
-
-    Returns
-    -------
-    Solution — list các route dạng [0, ..., 0].
-    """
+    # Điểm vào thống nhất để khởi tạo nghiệm ban đầu theo chiến lược được chọn.
     if strategy not in STRATEGY_MAP:
         raise ValueError(
             f"Chiến lược '{strategy}' không hợp lệ. "
             f"Chọn trong: {list(STRATEGY_MAP.keys())}"
         )
 
-    # [FIX-DEMAND] Build demands_map 1 lần, truyền thẳng vào fn()
     demands_map = _build_demands(num_nodes, demands, default_demand)
-    fn          = STRATEGY_MAP[strategy]
 
     if strategy == "random":
-        solution = fn(matrix, num_nodes, capacity, demands_map, max_vehicles, seed=seed)
-    else:
-        solution = fn(matrix, num_nodes, capacity, demands_map, max_vehicles)
+        solution = random_init(
+            matrix, num_nodes, capacity, demands_map, max_vehicles, seed=seed)
+    elif strategy == "greedy":
+        solution = greedy_init(
+            matrix, num_nodes, capacity, demands_map, max_vehicles)
+    else:  # "clarke_wright"
+        solution = clarke_wright_init(
+            matrix, num_nodes, capacity, demands_map, max_vehicles)
 
     if validate:
-        is_valid, errors = _validate_solution(
+        # [DRY-FIX] Dùng validate_solution từ Utils.vrp_utils
+        is_valid, errors = validate_solution(
             solution, num_nodes, demands_map, capacity)
         total_units = sum(_route_cost(r, matrix) for r in solution)
         total_km    = total_units / KM_SCALE

@@ -1,15 +1,13 @@
-
 import numpy as np
 import random
 import time
 from Models.cvrp_base import CVRPGraph
 from Core.ant import Ant
 
-KM_SCALE = 100  # 1 unit = 10m, 1 km = 100 units
+KM_SCALE = 100 
 
 # Số láng giềng tối đa trong candidate list
 CANDIDATE_K = 20
-
 
 class BasicACO:
     def __init__(self,
@@ -35,7 +33,7 @@ class BasicACO:
         # Cache demands array để vectorized check
         self._demands = np.array(
             [graph.nodes[i].demand for i in range(graph.node_num)],
-            dtype=np.float32  # [PERF-4] float32 đủ cho demand values
+            dtype=np.float32
         )
 
         # [PERF-2] Precompute candidate lists (top-K láng giềng gần nhất cho mỗi node)
@@ -48,14 +46,6 @@ class BasicACO:
     # ──────────────────────────────────────────────────────────────────
 
     def _build_candidate_lists(self, k: int) -> np.ndarray:
-        """
-        Lưu dưới dạng numpy array (node_num, k) dtype=int32.
-
-        Với n=1000, k=20:
-          - Mỗi node chỉ xét 20 neighbor thay vì ~500 feasible nodes
-          - Thời gian precompute: O(n² log k) một lần duy nhất
-          - Thời gian mỗi bước chọn: O(k) thay vì O(n)
-        """
         n = self.graph.node_num
         dist_mat = self.graph.node_dist_mat  # (n, n)
         candidate_lists = np.zeros((n, k), dtype=np.int32)
@@ -146,7 +136,6 @@ class BasicACO:
     # ──────────────────────────────────────────────────────────────────
     # Xây nghiệm cho một kiến
     # ──────────────────────────────────────────────────────────────────
-
     def _construct_solution(self, ant: Ant, q0: float):
         n_customers        = self.graph.node_num - 1
         max_customer_steps = n_customers
@@ -193,16 +182,6 @@ class BasicACO:
         self._apply_local_update_batch(local_update_batch)
 
     def _get_feasible_candidates(self, ant: Ant) -> list:
-        """
-        [PERF-2] Ưu tiên candidate list trước, fallback về toàn bộ nếu cần.
-
-        Luồng:
-          1. Lấy top-K neighbors của node hiện tại
-          2. Lọc: chỉ giữ node chưa thăm VÀ thỏa capacity
-          3. Nếu có → trả về danh sách này (thường đủ)
-          4. Nếu rỗng → fallback: vectorized check toàn bộ to_visit
-             (tránh bỏ sót node hợp lệ nằm ngoài top-K)
-        """
         current = ant.current_index
         to_visit_set = ant._index_to_visit_set
         load = ant.vehicle_load
@@ -244,7 +223,6 @@ class BasicACO:
     # ──────────────────────────────────────────────────────────────────
     # Chọn node tiếp theo — ACS transition rule
     # ──────────────────────────────────────────────────────────────────
-
     def select_next_index(self, ant: Ant, feasible_nodes: list, q0: float) -> int:
         current_index = ant.current_index
         feasible_arr  = np.array(feasible_nodes, dtype=np.int32)
@@ -270,7 +248,6 @@ class BasicACO:
     # ──────────────────────────────────────────────────────────────────
     # Helpers
     # ──────────────────────────────────────────────────────────────────
-
     @staticmethod
     def _roulette_wheel(candidates: list, probs: np.ndarray) -> int:
         probs = np.clip(probs, 0, None)

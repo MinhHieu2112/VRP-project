@@ -1,11 +1,13 @@
+# File định nghĩa các toán tử phá hủy (destroy operators) để loại bỏ các khách hàng khỏi lộ trình trong ALNS.
 import random
 import numpy as np
+import numpy.random as rnd
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from src.state import CvrpState
 
 def get_nodes_to_remove(state):
-    """
-    Xóa 5-10% số khách ĐANG TRONG ROUTES, không phải tổng ma trận.
-    Giới hạn tối đa 30 node để repair không bị quá tải.
-    """
+    # Xác định số lượng node khách hàng cần loại bỏ dựa trên tổng số khách hiện có.
     num_clients_in_routes = sum(
         len(r) - 2 for r in state.routes if len(r) > 2
     )
@@ -14,11 +16,7 @@ def get_nodes_to_remove(state):
 
 
 def _cleanup_empty_routes(state):
-    """
-    Xóa các route trống ([0, 0]) và đồng bộ route_loads.
-    BUG FIX: trước đây chỉ lọc routes mà không cập nhật route_loads,
-    khiến route_loads dài hơn routes → IndexError trong repair operators.
-    """
+    # Lọc bỏ các tuyến đường rỗng và đồng bộ danh sách tải trọng tương ứng.
     kept = [(r, load) for r, load in zip(state.routes, state.route_loads) if len(r) > 2]
     if kept:
         state.routes, state.route_loads = map(list, zip(*kept))
@@ -27,12 +25,11 @@ def _cleanup_empty_routes(state):
         state.route_loads = []
 
 
-def random_removal(state, random_state):
-    """Xóa ngẫu nhiên các khách hàng."""
+def random_removal(state: "CvrpState", rng: rnd.Generator, **kwargs) -> "CvrpState":
+    # Toán tử loại bỏ ngẫu nhiên một số lượng khách hàng khỏi các tuyến đường hiện tại.
     destroyed = state.copy()
     nodes_to_remove = get_nodes_to_remove(state)
 
-    # Lấy tất cả khách hàng hiện có trong các route (trừ kho 0)
     all_clients = []
     for route in destroyed.routes:
         all_clients.extend([node for node in route if node != 0])
@@ -41,7 +38,7 @@ def random_removal(state, random_state):
         return destroyed
 
     nodes_to_remove = min(nodes_to_remove, len(all_clients))
-    to_remove = random_state.choice(all_clients, nodes_to_remove, replace=False)
+    to_remove = rng.choice(all_clients, nodes_to_remove, replace=False)
 
     for node in to_remove:
         destroyed.unassigned.append(node)
@@ -51,13 +48,12 @@ def random_removal(state, random_state):
                 destroyed.route_loads[r_idx] -= destroyed.demands[node]
                 break
 
-    # Dọn dẹp các route trống — đồng bộ cả route_loads
     _cleanup_empty_routes(destroyed)
     return destroyed
 
 
-def worst_removal(state, random_state):
-    """Xóa những khách hàng có chi phí đóng góp vào route cao nhất."""
+def worst_removal(state: "CvrpState", rng: rnd.Generator, **kwargs) -> "CvrpState":
+    # Toán tử loại bỏ các khách hàng có chi phí tăng thêm cao nhất trong lộ trình.
     destroyed = state.copy()
     nodes_to_remove = get_nodes_to_remove(state)
 
@@ -92,6 +88,5 @@ def worst_removal(state, random_state):
                 break
         removed_count += 1
 
-    # Dọn dẹp các route trống — đồng bộ cả route_loads
     _cleanup_empty_routes(destroyed)
     return destroyed

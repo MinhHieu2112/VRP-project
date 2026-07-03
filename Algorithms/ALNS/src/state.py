@@ -1,12 +1,14 @@
+# File định nghĩa lớp biểu diễn trạng thái lời giải CvrpState phục vụ cho ALNS.
 import copy
 import sys
 from alns import State
 import numpy as np
 
-
 class CvrpState(State):
+    """Trạng thái lời giải CVRP chứa danh sách các tuyến đường và khách hàng chưa gán."""
+
     def __init__(self, routes, unassigned, distance_matrix, capacity, demands, config):
-        # distance_matrix đơn vị mét (int). Chia 1000 CHỈ khi xuất báo cáo.
+        # Khởi tạo các thuộc tính của trạng thái lời giải và tính toán tải trọng các tuyến.
         self.routes = routes
         self.unassigned = unassigned
         self.distance_matrix = distance_matrix
@@ -16,6 +18,7 @@ class CvrpState(State):
         self.route_loads = [sum(demands[node] for node in r if node != 0) for r in routes]
 
     def objective(self):
+        # Tính tổng quãng đường di chuyển cộng với các khoản phạt vi phạm ràng buộc.
         total_distance = sum(self.route_cost(route) for route in self.routes)
 
         constraints = self.config.get("constraints", {})
@@ -34,27 +37,12 @@ class CvrpState(State):
         return total_distance + total_penalty + vehicle_penalty
 
     def apply_2opt(self):
-        """
-        Or-opt nội tuyến thay thế 2-opt cổ điển, phù hợp với ACVRP bất đối xứng.
-
-        VẤN ĐỀ CỦA 2-OPT TRUYỀN THỐNG VỚI ACVRP:
-        2-opt đảo ngược đoạn route[i:j+1], điều này chỉ đúng với ma trận đối xứng
-        (d(A,B) == d(B,A)). Với ACVRP (d(i,j) ≠ d(j,i)), đảo ngược chiều đi
-        thường làm chi phí tăng — đó là lý do kết quả nhảy từ ~776 lên 799 km.
-
-        GIẢI PHÁP — Or-opt (relocate 1 node):
-        Thay vì đảo đoạn, thử dịch chuyển từng node sang vị trí khác trong cùng route.
-        Or-opt tương thích với ACVRP vì không đảo chiều cung.
-
-        Đây là local search làm mịn sau ALNS — không cần chạy quá nhiều vòng.
-        """
+        # Thực hiện thuật toán Or-opt nội tuyến làm mịn lộ trình mà không làm đảo cung bất đối xứng.
         import sys
 
         new_routes = []
         active = [r for r in self.routes if len(r) > 2]
         total  = len(active)
-
-        print(f"Đang Or-opt (relocate) {total} xe:")
 
         for idx, route in enumerate(active):
             percent  = (idx + 1) / total * 100
@@ -70,7 +58,7 @@ class CvrpState(State):
 
             best_route = route[:]
             improved   = True
-            max_iters  = 50   # giới hạn vòng lặp để không chạy quá lâu
+            max_iters  = 50
 
             while improved and max_iters > 0:
                 improved  = False
@@ -81,7 +69,6 @@ class CvrpState(State):
                     prev_i = best_route[i - 1]
                     next_i = best_route[i + 1]
 
-                    # Chi phí khi bỏ node ra khỏi vị trí hiện tại
                     cost_remove = (
                         self.distance_matrix[prev_i, node]
                         + self.distance_matrix[node, next_i]
@@ -97,7 +84,6 @@ class CvrpState(State):
                         prev_j = best_route[j - 1]
                         next_j = best_route[j]
 
-                        # Chi phí khi chèn node vào sau vị trí j-1
                         cost_insert = (
                             self.distance_matrix[prev_j, node]
                             + self.distance_matrix[node, next_j]
@@ -110,53 +96,53 @@ class CvrpState(State):
                             best_j    = j
 
                     if best_j != -1:
-                        # Thực hiện move: xóa node khỏi i, chèn vào best_j
                         route_tmp = best_route[:]
                         route_tmp.pop(i)
-                        # Điều chỉnh index sau khi pop
                         insert_at = best_j if best_j < i else best_j - 1
                         route_tmp.insert(insert_at, node)
                         best_route = route_tmp
                         improved   = True
-                        break  # restart từ đầu route sau mỗi move
+                        break
 
             new_routes.append(best_route)
 
         self.routes = new_routes
-
-        # Đồng bộ route_loads (Or-opt không thay đổi thành phần khách hàng)
         self.route_loads = [
             sum(self.demands[node] for node in r if node != 0)
             for r in self.routes
         ]
-
         print("\n[XONG] Đã xong toàn bộ lộ trình.")
 
     def copy(self):
+        # Sao chép sâu trạng thái lời giải hiện tại.
         new_state = object.__new__(CvrpState)
         new_state.routes            = [r[:] for r in self.routes]
         new_state.unassigned        = self.unassigned[:]
-        new_state.distance_matrix   = self.distance_matrix   # shared, read-only
+        new_state.distance_matrix   = self.distance_matrix
         new_state.capacity          = self.capacity
-        new_state.demands           = self.demands            # shared, read-only
-        new_state.config            = self.config             # shared, read-only
-        new_state.route_loads       = self.route_loads[:]    # copy cache
+        new_state.demands           = self.demands
+        new_state.config            = self.config
+        new_state.route_loads       = self.route_loads[:]
         return new_state
 
     @property
     def cost(self):
+        # Lấy giá trị hàm mục tiêu của trạng thái.
         return self.objective()
 
     def get_route_load(self, route_idx):
+        # Lấy tổng tải trọng của tuyến đường được chỉ định.
         return self.route_loads[route_idx]
 
     def is_valid(self):
+        # Kiểm tra xem phương án hiện tại có vi phạm ràng buộc tải trọng hay không.
         for i, route in enumerate(self.routes):
             if self.route_loads[i] > self.capacity:
                 return False
         return True
 
     def route_cost(self, route):
+        # Tính toán chi phí khoảng cách thực tế của một tuyến đường cụ thể.
         cost = 0
         for i in range(len(route) - 1):
             cost += self.distance_matrix[route[i], route[i + 1]]

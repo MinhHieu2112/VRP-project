@@ -1,14 +1,4 @@
-"""
-Algorithms/ACO/solver_aco.py
-FIXES:
-  [FIX-1] DataLoader.load_data() trả dict, không phải tuple → unpack đúng.
-  [FIX-2] load_config dùng realpath(__file__) thay 'config.json' relative.
-  [FIX-3] output_dir dùng _PROJECT_ROOT, không double-prefix config path.
-  [FIX-5] parse_routes xử lý route cuối không kết thúc bằng 0.
-  [FIX-SEED] seed_weight đọc từ config (1.3 thay 2.0) để giảm lock greedy.
-  [REFACTOR] Tách các logic trong run_aco_solver() thành các hàm con.
-"""
-
+# File điều phối chính chạy thuật toán ACO (Ant Colony Optimization) giải bài toán VRP.
 import os, sys, json, time
 import numpy as np
 
@@ -25,14 +15,14 @@ from Utils.Visualizer import Visualizer
 
 KM_SCALE = 100
 
-
 def load_config() -> dict:
+    # Đọc thông tin cấu hình thuật toán từ tệp config.json.
     config_path = os.path.join(_THIS_DIR, 'config.json')
     with open(config_path, 'r') as f:
         return json.load(f)
 
-
 def load_data_from_loader(config: dict) -> tuple:
+    # Nạp dữ liệu bài toán và đồng bộ số lượng node với ma trận khoảng cách.
     print("Initializing DataLoader...")
     data             = DataLoader(config).load_data()
     matrix_int       = data['distance_matrix']
@@ -40,13 +30,9 @@ def load_data_from_loader(config: dict) -> tuple:
     df_locs          = data['df_locations']
     demands          = data['demands']
 
-    # --- ĐOẠN SỬA LỖI: Đồng bộ số lượng node ---
     num_nodes_from_matrix = matrix_int.shape[0]
-    
-    # Chỉ lấy đúng số dòng tương ứng với ma trận từ file locations và demands
     df_locs = df_locs.head(num_nodes_from_matrix)
     demands = demands[:num_nodes_from_matrix]
-    # ------------------------------------------
 
     nodes = [
         Node(int(row['id']), float(row['lat']), float(row['lon']), float(demands[idx]))
@@ -59,6 +45,7 @@ def load_data_from_loader(config: dict) -> tuple:
 
 
 def parse_routes(best_path: list) -> dict:
+    # Chuyển đổi đường đi phẳng của kiến thành dict các tuyến đường xe.
     routes, current_route, vehicle_id = {}, [0], 0
     for node in best_path[1:]:
         current_route.append(node)
@@ -67,7 +54,7 @@ def parse_routes(best_path: list) -> dict:
                 routes[vehicle_id] = current_route[:]
                 vehicle_id += 1
             current_route = [0]
-    if len(current_route) > 1:             # [FIX-5] route cuối
+    if len(current_route) > 1:
         current_route.append(0)
         if len(current_route) > 2:
             routes[vehicle_id] = current_route[:]
@@ -75,6 +62,7 @@ def parse_routes(best_path: list) -> dict:
 
 
 def setup_aco_engine(graph: CVRPGraph, aco_cfg: dict) -> BasicACO:
+    # Khởi tạo đối tượng ACO với các tham số từ cấu hình.
     return BasicACO(
         graph,
         ants_num        = aco_cfg.get('ants_num',          20),
@@ -87,7 +75,7 @@ def setup_aco_engine(graph: CVRPGraph, aco_cfg: dict) -> BasicACO:
 
 
 def save_and_visualize(routes, best_dist, best_v, elapsed, config, df_locs):
-    #actual_vehicles = len(routes) if routes else 0
+    # Lưu kết quả lời giải và tạo bản đồ trực quan hóa các tuyến đường.
     result = {
         "solver_name":       "ACO",
         "total_distance_km": best_dist / KM_SCALE,
@@ -95,7 +83,7 @@ def save_and_visualize(routes, best_dist, best_v, elapsed, config, df_locs):
         "routes":            routes,
         "num_vehicles":      best_v,
     }
-    output_dir = os.path.join(_PROJECT_ROOT, 'Results', 'ACO')  # [FIX-3]
+    output_dir = os.path.join(_PROJECT_ROOT, 'Results', 'ACO')
     os.makedirs(output_dir, exist_ok=True)
     ResultHandler.save_to_txt(result, output_dir)
 
@@ -114,7 +102,7 @@ def save_and_visualize(routes, best_dist, best_v, elapsed, config, df_locs):
 
 
 def _initialize_seed(dist_mat, num_nodes, capacity, aco_cfg):
-    """Xử lý khởi tạo nghiệm ban đầu"""
+    # Khởi tạo nghiệm mốc ban đầu để định hướng pheromone cho kiến.
     seed_strategy = aco_cfg.get('seed_strategy', '')
     seed_weight   = aco_cfg.get('seed_weight', 1.3)
     print(f"Building seed solution ({seed_strategy})...")
@@ -130,22 +118,17 @@ def _initialize_seed(dist_mat, num_nodes, capacity, aco_cfg):
     return seed_sol, seed_cost, seed_weight
 
 def _execute_aco(graph, aco_cfg, seed_sol, seed_cost):
-    """Thiết lập và chạy thuật toán ACO"""
+    # Thiết lập và chạy vòng tối ưu hóa chính của thuật toán ACO.
     aco = setup_aco_engine(graph, aco_cfg)
     
-    # --- ĐOẠN SỬA LỖI (FIX) ---
-    # Chuyển đổi seed_sol (list of lists) thành flat list
-    # Ví dụ: [[0, 1, 2, 0], [0, 3, 4, 0]] -> [0, 1, 2, 0, 3, 4, 0]
     flat_seed_path = []
     for route in seed_sol:
         if not flat_seed_path:
-            flat_seed_path.extend(route) # Add route đầu tiên
+            flat_seed_path.extend(route)
         else:
-            flat_seed_path.extend(route[1:]) # Bỏ qua số 0 ở đầu để tránh trùng lặp 0, 0
-    # --------------------------
+            flat_seed_path.extend(route[1:])
 
     aco.best_path_distance = float(seed_cost) 
-    # Gán flat list đã được làm phẳng thay vì list of lists ban đầu
     aco.best_path = flat_seed_path 
     
     start = time.time()
@@ -156,6 +139,7 @@ def _execute_aco(graph, aco_cfg, seed_sol, seed_cost):
 
 
 def run_aco_solver():
+    # Điều phối toàn bộ quy trình ACO từ nạp cấu hình đến lưu kết quả.
     config  = load_config()
     aco_cfg = config.get('solvers', {}).get('aco', {})
 

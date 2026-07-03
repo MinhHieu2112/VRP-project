@@ -1,14 +1,4 @@
-"""
-Algorithms/Tabu/main_tabu.py
-Entry-point cho Granular Tabu Search solver.
-Cải tiến dựa trên Toth & Vigo (2003) và Gendreau et al. (1994).
-
-CHANGES:
-  [CFG-1] Đọc init_strategy từ config_tabu.json['tabu_parameters']['init_strategy']
-          thay vì hardcode "clarke_wright" trong code.
-  [CFG-2] Log rõ strategy đang dùng.
-"""
-
+# File chạy chính cho thuật toán Granular Tabu Search (GTS) giải quyết bài toán VRP.
 import os
 import sys
 import json
@@ -20,17 +10,19 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_DIR))
 sys.path.append(PROJECT_ROOT)
 
 from Algorithms.Init_strategies.Init_strategies import init_solution
-from Algorithms.Tabu.tabu_solver import GranularTabuSearch
+from Algorithms.Tabu.solver import GranularTabuSearch
 from Utils.Pipeline import load_data, build_result, save_result, visualize
 
 
 def load_config() -> dict:
+    # Đọc thông tin cấu hình của GTS từ tệp config_tabu.json.
     path = os.path.join(CURRENT_DIR, 'config_tabu.json')
     with open(path, 'r', encoding='utf-8') as f:
         return json.load(f)
 
 
 def verify_coverage(initial_state: list, num_nodes: int):
+    # Kiểm tra xem toàn bộ khách hàng đã được phục vụ trong nghiệm ban đầu hay chưa.
     served  = {n for r in initial_state for n in r if n != 0}
     missing = set(range(1, num_nodes)) - served
     if missing:
@@ -41,6 +33,7 @@ def verify_coverage(initial_state: list, num_nodes: int):
 
 
 def run_tabu():
+    # Thực hiện toàn bộ quy trình chạy tối ưu hóa bằng thuật toán GTS và lưu kết quả.
     print("\n===== RUN GRANULAR TABU SEARCH (Toth & Vigo, 2003) =====")
     config = load_config()
     data   = load_data(config)
@@ -55,7 +48,6 @@ def run_tabu():
     tabu_p = config['tabu_parameters']
     cons   = config['constraints']
 
-    # [CFG-1] Đọc init_strategy từ config, default = "clarke_wright"
     init_strategy = tabu_p.get('init_strategy', 'clarke_wright')
     print(f"[Tabu] Khởi tạo nghiệm bằng chiến lược: '{init_strategy}'")
 

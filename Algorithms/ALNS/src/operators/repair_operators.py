@@ -1,26 +1,18 @@
-"""
-Algorithms/ALNS/src/operators/repair_operators.py
-
-FIXES so với bản cũ:
-  [FIX-CACHE] regret_insertion: invalidate toàn bộ cache sau mỗi lần chèn.
-              Bản cũ chỉ invalidate node có best_insertion trỏ vào r_idx vừa thay đổi
-              → miss những node mà route r_idx giờ rẻ hơn nhưng chưa được check.
-              Đơn giản và đúng hơn: dirty = set(unassigned) sau mỗi insertion.
-"""
-
+# File định nghĩa các toán tử tái thiết (repair operators) để chèn lại các khách hàng chưa gán vào lộ trình.
 import numpy as np
+import numpy.random as rnd
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from src.state import CvrpState
 
 
 def get_actual_vehicle_count(routes: list) -> int:
+    # Đếm số lượng xe thực tế đang thực hiện lộ trình (độ dài tuyến đường lớn hơn 2).
     return sum(1 for r in routes if len(r) > 2)
 
 
-def _best_insertions_for_node(node, node_demand, routes, route_loads,
-                               dist, capacity, top_k=2) -> list:
-    """
-    Tìm top_k vị trí chèn tốt nhất cho node (thỏa capacity).
-    Trả về list [(cost, r_idx, pos_idx)] đã sort tăng dần.
-    """
+def _best_insertions_for_node(node, node_demand, routes, route_loads, dist, capacity, top_k=2) -> list:
+    # Tìm kiếm các vị trí chèn tốt nhất cho khách hàng thỏa mãn ràng buộc tải trọng.
     best = []
     for r_idx, route in enumerate(routes):
         if route_loads[r_idx] + node_demand > capacity:
@@ -39,12 +31,7 @@ def _best_insertions_for_node(node, node_demand, routes, route_loads,
 
 
 def _fallback_insert(repaired, node: int, node_demand: int, max_v: int):
-    """
-    Chèn node khi không có vị trí nào thỏa capacity:
-      - Còn slot xe → mở xe mới [0, node, 0]
-      - Hết xe      → chèn vào xe ít tải nhất (vi phạm tạm thời,
-                       penalty trong objective() sẽ dẫn ALNS sửa sau)
-    """
+    # Cơ chế chèn dự phòng khi không tìm được vị trí chèn hợp lệ nào thỏa mãn tải trọng.
     if get_actual_vehicle_count(repaired.routes) < max_v:
         repaired.routes.append([0, node, 0])
         repaired.route_loads.append(node_demand)
@@ -61,13 +48,10 @@ def _fallback_insert(repaired, node: int, node_demand: int, max_v: int):
             repaired.route_loads.append(node_demand)
 
 
-def greedy_insertion(state, random_state):
-    """
-    Chèn tham lam: với mỗi node unassigned (thứ tự ngẫu nhiên),
-    chọn vị trí có chi phí tăng thêm thấp nhất trong các xe hiện có.
-    """
+def greedy_insertion(state: "CvrpState", rng: rnd.Generator, **kwargs) -> "CvrpState":
+    # Tái thiết lời giải bằng phương pháp chèn tham lam lần lượt các khách hàng chưa gán.
     repaired = state.copy()
-    random_state.shuffle(repaired.unassigned)
+    rng.shuffle(repaired.unassigned)
 
     constraints = repaired.config.get(
         'global_constraints', repaired.config.get('constraints', {}))
@@ -94,17 +78,8 @@ def greedy_insertion(state, random_state):
     return repaired
 
 
-def regret_insertion(state, random_state):
-    """
-    Chèn hối tiếc (Regret-2):
-      1. Tính regret = (2nd-best cost) - (best cost) cho mỗi node
-      2. Chèn node có regret cao nhất (node khó chèn nhất)
-      3. Sau mỗi lần chèn, recompute toàn bộ cache
-
-    [FIX-CACHE] dirty = set(unassigned) — recompute tất cả thay vì
-    chỉ subset dựa trên r_idx. Chi phí tính toán tăng nhẹ nhưng
-    tránh chọn sai thứ tự do cache stale.
-    """
+def regret_insertion(state: "CvrpState", rng: rnd.Generator, **kwargs) -> "CvrpState":
+    # Tái thiết lời giải dựa trên độ hối tiếc Regret-2 khi chèn khách hàng.
     repaired = state.copy()
     constraints = repaired.config.get(
         'global_constraints', repaired.config.get('constraints', {}))
@@ -115,7 +90,7 @@ def regret_insertion(state, random_state):
     repaired.unassigned = []
 
     def compute_entry(node):
-        """Trả về (regret_score, best_insertion_tuple_or_None)."""
+        # Tính toán chi phí hối tiếc của việc không chèn node vào vị trí tốt nhất.
         node_demand = repaired.demands[node]
         top2 = _best_insertions_for_node(
             node, node_demand,
@@ -125,17 +100,13 @@ def regret_insertion(state, random_state):
         if len(top2) >= 2:
             return (top2[1][0] - top2[0][0], top2[0])
         elif len(top2) == 1:
-            # Chỉ 1 vị trí → regret rất cao (ưu tiên chèn trước)
             return (1e9, top2[0])
         else:
-            # Không có vị trí nào thỏa capacity → regret âm (chèn sau cùng)
             return (-1.0, None)
 
-    # Build cache lần đầu
     cache = {node: compute_entry(node) for node in unassigned}
 
     while unassigned:
-        # Chọn node có regret lớn nhất
         best_node = max(unassigned, key=lambda n: cache[n][0])
         _, best_insertion = cache[best_node]
 
@@ -150,7 +121,6 @@ def regret_insertion(state, random_state):
             _fallback_insert(
                 repaired, best_node, repaired.demands[best_node], max_v)
 
-        # [FIX-CACHE] Recompute toàn bộ cache sau mỗi lần chèn/fallback
         for n in unassigned:
             cache[n] = compute_entry(n)
 

@@ -1,28 +1,19 @@
-"""
-Utils/Data_loader.py
-FIXES:
-  [FIX-4] realpath(__file__) thay abspath: khi import qua sys.path.append từ thư mục con,
-           __file__ có thể là relative → abspath resolve từ cwd (sai). realpath luôn đúng.
-  [FIX-8] Đọc cả 'locations_data' (Utils/config) và 'locations' (ACO/config).
-"""
-
 import pandas as pd
 import numpy as np
 import os
 
-_THIS_FILE   = os.path.realpath(__file__)          # [FIX-4] realpath, not abspath
+_THIS_FILE   = os.path.realpath(__file__)         
 _UTILS_DIR   = os.path.dirname(_THIS_FILE)
 PROJECT_ROOT = os.path.dirname(_UTILS_DIR)
 
 
 class DataLoader:
-    KM_SCALE = 100  # 1 unit = 10m, 1 km = 100 units
+    KM_SCALE = 100  
 
     def __init__(self, config: dict):
         self.config = config
         paths = config.get('paths', {})
         matrix_rel   = paths.get('distance_matrix', 'Data/orsm_matrix.csv')
-        # [FIX-8] Tương thích cả hai key name
         location_rel = (paths.get('locations_data') or
                         paths.get('locations', 'Data/locations.csv'))
         self.matrix_path   = os.path.normpath(os.path.join(PROJECT_ROOT, matrix_rel))
