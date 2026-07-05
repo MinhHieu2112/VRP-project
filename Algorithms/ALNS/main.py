@@ -1,10 +1,10 @@
-# File chạy chính của thuật toán ALNS phối hợp luồng giải để tối ưu hóa lộ trình VRP.
+# File chạy chính của thuật toán ALNS phối hợp luồng giải để tối ưu hóa lộ trình VRP sử dụng AlgorithmRunner.
+from __future__ import annotations
+
 import os
 import sys
-import json
 import time
 import threading
-import numpy as np
 from typing import Optional
 
 _THIS_DIR     = os.path.dirname(os.path.realpath(__file__))
@@ -12,10 +12,11 @@ _PROJECT_ROOT = os.path.normpath(os.path.join(_THIS_DIR, '..', '..'))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from Utils.Pipeline import load_data, build_result, save_result, visualize, KM_SCALE
+from Utils.Pipeline import AlgorithmRunner, KM_SCALE
 from Algorithms.Init_strategies.Init_strategies import init_solution
 from src.state import CvrpState
 from src.solver import configure_alns
+
 
 class NoImprovementStop:
     # Điều kiện dừng khi hàm mục tiêu không cải thiện sau số vòng lặp tối đa.
@@ -37,20 +38,6 @@ class NoImprovementStop:
         return self._count >= self._limit
 
 
-def load_config(path: Optional[str] = None) -> dict:
-    # Tải cấu hình tham số của thuật toán từ tệp JSON.
-    if path is None:
-        path = os.path.join(_THIS_DIR, 'config.json')
-    with open(path, 'r', encoding='utf-8') as f:
-        config = json.load(f)
-    if not isinstance(config, dict):
-        config = {}
-    for key in ['global_constraints', 'constraints', 'alns_parameters']:
-        if config.get(key) is None:
-            config[key] = {}
-    return config
-
-
 def build_initial_state(data: dict, config: dict) -> CvrpState:
     # Khởi tạo trạng thái nghiệm ban đầu cho mô hình VRP đồng thời dựng candidate list.
     matrix   = data['distance_matrix']
@@ -61,7 +48,7 @@ def build_initial_state(data: dict, config: dict) -> CvrpState:
     demands_dict = {i: int(demands_arr[i]) for i in range(num_nodes)}
     constraints  = config.get('global_constraints') or config.get('constraints') or {}
 
-    from Algorithms.Tabu.utils import build_granular_lists
+    from Utils.Operators.local_search import build_granular_lists
     alns_cfg      = config.get('alns_parameters') or {}
     granular_beta = alns_cfg.get('granular_beta', 1.5)
     granular_k    = alns_cfg.get('granular_k', 20)
@@ -100,75 +87,88 @@ def _progress_logger(stop_flag: threading.Event, shared: list, start_time: float
     return _run
 
 
-def main():
-    # Điều phối quy trình tối ưu VRP bằng ALNS từ nạp dữ liệu đến lưu kết quả.
-    config = load_config()
-    data   = load_data(config)
+class ALNSSolverWrapper:
+    """Wrapper bọc ALNS solver để tuân thủ interface solve() của AlgorithmRunner."""
 
-    matrix   = data['distance_matrix']
-    df_locs  = data['df_locations']
-    capacity = data['vehicle_capacity']
+    def __init__(self, data: dict, config: dict) -> None:
+        self.data = data
+        self.config = config
 
-    init_state   = build_initial_state(data, config)
-    init_cost_km = sum(init_state.route_costs) / KM_SCALE
+    def solve(self) -> tuple[list, float]:
+        matrix   = self.data['distance_matrix']
+        capacity = self.data['vehicle_capacity']
 
-    print(f"[*] {matrix.shape[0]-1} khách hàng | "
-          f"{len(init_state.routes)} xe ban đầu | capacity={capacity}")
-    print(f"[*] Quãng đường ban đầu: {init_cost_km:.2f} km")
+        init_state   = build_initial_state(self.data, self.config)
+        init_cost_km = sum(init_state.route_costs) / KM_SCALE
 
-    alns, accept, select, _ = configure_alns(init_state, config)
+        print(f"[*] {matrix.shape[0]-1} khách hàng | "
+              f"{len(init_state.routes)} xe ban đầu | capacity={capacity}")
+        print(f"[*] Quãng đường ban đầu: {init_cost_km:.2f} km")
 
-    p              = config['alns_parameters']
-    max_no_improve = p.get('max_no_improve', 2000)
-    print(f"--- Tối ưu (dừng sau {max_no_improve} vòng không cải thiện) ---")
+        alns, accept, select, _ = configure_alns(init_state, self.config)
 
-    shared     = [init_cost_km, 0, 0]
-    stop_flag  = threading.Event()
-    start_time = time.time()
+        p              = self.config['alns_parameters']
+        max_no_improve = p.get('max_no_improve', 2000)
+        print(f"--- Tối ưu (dừng sau {max_no_improve} vòng không cải thiện) ---")
 
-    def on_best(state, _rnd):
-        # Cập nhật kết quả tốt nhất khi tìm thấy lời giải cải tiến.
-        km = sum(state.route_costs) / KM_SCALE
-        shared[0]  = km
-        shared[1]  = len(state.unassigned)
-        shared[2] += 1
-        sys.stdout.write(
-            f"\n  -> [#{shared[2]}] {km:.2f} km | Unassigned: {shared[1]}\n"
+        shared     = [init_cost_km, 0, 0]
+        stop_flag  = threading.Event()
+        start_time = time.time()
+
+        def on_best(state, _rnd):
+            km = sum(state.route_costs) / KM_SCALE
+            shared[0]  = km
+            shared[1]  = len(state.unassigned)
+            shared[2] += 1
+            sys.stdout.write(
+                f"\n  -> [#{shared[2]}] {km:.2f} km | Unassigned: {shared[1]}\n"
+            )
+            sys.stdout.flush()
+
+        alns.on_best(on_best)
+
+        t = threading.Thread(
+            target=_progress_logger(stop_flag, shared, start_time), daemon=True
         )
-        sys.stdout.flush()
+        t.start()
 
-    alns.on_best(on_best)
+        result_alns = alns.iterate(
+            init_state, select, accept,
+            stop=NoImprovementStop(max_no_improve)
+        )
 
-    t = threading.Thread(
-        target=_progress_logger(stop_flag, shared, start_time), daemon=True
-    )
-    t.start()
+        stop_flag.set()
+        t.join(timeout=1)
 
-    result_alns = alns.iterate(
-        init_state, select, accept,
-        stop=NoImprovementStop(max_no_improve)
-    )
+        best_state = result_alns.best_state
+        print("\n--- 2-opt làm mịn lộ trình ---")
+        best_state.apply_2opt()
 
-    stop_flag.set()
-    t.join(timeout=1)
+        active_routes    = [r for r in best_state.routes if len(r) > 2]
+        total_cost_units = sum(best_state.route_costs)
 
-    best_state = result_alns.best_state
-    print("\n--- 2-opt làm mịn lộ trình ---")
-    best_state.apply_2opt()
+        return active_routes, total_cost_units
 
-    elapsed = time.time() - start_time
 
-    active_routes    = [r for r in best_state.routes if len(r) > 2]
-    total_cost_units = sum(best_state.route_costs)
+class ALNSRunner(AlgorithmRunner):
+    """Runner cho thuật toán ALNS kế thừa AlgorithmRunner."""
 
-    result = build_result("ALNS", active_routes, total_cost_units, elapsed)
+    def _load_config(self) -> dict:
+        # Override load_config để xử lý logic gán mặc định của ALNS.
+        config = super()._load_config()
+        for key in ['global_constraints', 'constraints', 'alns_parameters']:
+            if config.get(key) is None:
+                config[key] = {}
+        return config
 
-    save_result(result, config, "ALNS")
-    visualize(result, config, "ALNS", df_locs)
-
-    print(f"\n[ALNS DONE] {result['total_distance_km']:.2f} km | "
-          f"{result['num_vehicles']} xe | {elapsed:.2f}s")
+    def build_solver(self, data: dict, config: dict) -> ALNSSolverWrapper:
+        # Khởi tạo wrapper cho ALNS solver.
+        return ALNSSolverWrapper(data, config)
 
 
 if __name__ == "__main__":
-    main()
+    runner = ALNSRunner(
+        name        = "ALNS",
+        config_path = os.path.join(_THIS_DIR, "config.json"),
+    )
+    runner.run()

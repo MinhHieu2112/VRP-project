@@ -8,7 +8,6 @@ from typing import Dict, List, Tuple
 from Algorithms.Init_strategies.Init_strategies import init_solution
 from Algorithms.SA.config_handler import load_sa_config, SAConfig
 from Algorithms.SA.cost_evaluator import route_cost, build_route_costs
-from Algorithms.SA.moves import try_swap, try_relocate, try_intra_swap
 
 KM_SCALE = 100
 
@@ -62,9 +61,10 @@ class SimulatedAnnealingSolver:
         return sol
 
     def solve(self) -> Tuple[List[List[int]], float]:
-        # Thực hiện vòng lặp mô phỏng luyện kim để tìm kiếm lời giải tối ưu nhất.
+        # Thực hiện vòng lặp mô phỏng luyện kim tối ưu với Delta Evaluation O(1) để tìm lời giải tốt nhất.
         current_sol = self.initial_solution()
         route_costs = build_route_costs(self.dist, current_sol)
+        route_loads = [sum(self.demands_map[node] for node in r) for r in current_sol]
         current_cost = sum(route_costs) + len(current_sol) * self.vehicle_penalty
 
         best_sol = [r[:] for r in current_sol]
@@ -73,6 +73,11 @@ class SimulatedAnnealingSolver:
         T = self.T_start
         no_improve_count = 0
         step = 0
+
+        # Import trực tiếp các hàm đánh giá delta O(1)
+        from Algorithms.SA.cost_evaluator import (
+            eval_swap_delta, eval_relocate_delta, eval_intra_swap_delta
+        )
 
         while T > self.T_min:
             if no_improve_count >= self.max_no_improve:
@@ -94,82 +99,94 @@ class SimulatedAnnealingSolver:
                     continue
 
                 move_type = random.random()
-                move_result = None
 
                 if move_type < 0.4:
+                    # Phép thử Inter-route Swap (tráo đổi 2 node giữa 2 tuyến)
                     if len(r2) <= 2:
                         continue
                     i = random.randint(1, len(r1) - 2)
                     j = random.randint(1, len(r2) - 2)
-                    move_result = try_swap(
-                        r1=r1,
-                        r2=r2,
-                        idx1=i,
-                        idx2=j,
-                        demands_map=self.demands_map,
-                        capacity=self.capacity,
-                        cost_r1=route_costs[idx1],
-                        cost_r2=route_costs[idx2],
-                    )
+                    u, v = r1[i], r2[j]
+
+                    new_load1 = route_loads[idx1] - self.demands_map[u] + self.demands_map[v]
+                    new_load2 = route_loads[idx2] - self.demands_map[v] + self.demands_map[u]
+
+                    if new_load1 > self.capacity or new_load2 > self.capacity:
+                        continue
+
+                    delta_r1, delta_r2 = eval_swap_delta(self.dist, r1, r2, i, j)
+                    delta_cost = delta_r1 + delta_r2
+
+                    accept = delta_cost < 0 or random.random() < math.exp(-min(delta_cost / T, 700.0))
+                    if accept:
+                        r1[i], r2[j] = r2[j], r1[i]
+                        route_loads[idx1] = new_load1
+                        route_loads[idx2] = new_load2
+                        route_costs[idx1] += delta_r1
+                        route_costs[idx2] += delta_r2
+                        current_cost += delta_cost
+
+                        if current_cost < best_cost:
+                            best_sol = [r[:] for r in current_sol]
+                            best_cost = current_cost
+                            improved_this_temp = True
 
                 elif move_type < 0.8:
+                    # Phép thử Inter-route Relocate (chuyển 1 node sang tuyến xe khác)
                     i = random.randint(1, len(r1) - 2)
-                    move_result = try_relocate(
-                        r1=r1,
-                        r2=r2,
-                        idx1=i,
-                        demands_map=self.demands_map,
-                        capacity=self.capacity,
-                        cost_r1=route_costs[idx1],
-                        cost_r2=route_costs[idx2],
-                    )
+                    u = r1[i]
+
+                    new_load2 = route_loads[idx2] + self.demands_map[u]
+                    if new_load2 > self.capacity:
+                        continue
+
+                    ins_pos = random.randint(1, len(r2) - 1)
+                    delta_r1, delta_r2 = eval_relocate_delta(self.dist, r1, r2, i, ins_pos)
+                    delta_cost = delta_r1 + delta_r2
+
+                    # Phạt số lượng xe nếu r1 trở thành rỗng (chỉ còn [0, 0])
+                    v_delta = 0
+                    if len(r1) == 3:
+                        v_delta = -self.vehicle_penalty
+                    delta_cost += v_delta
+
+                    accept = delta_cost < 0 or random.random() < math.exp(-min(delta_cost / T, 700.0))
+                    if accept:
+                        r1.pop(i)
+                        r2.insert(ins_pos, u)
+                        route_loads[idx1] -= self.demands_map[u]
+                        route_loads[idx2] = new_load2
+                        route_costs[idx1] += delta_r1
+                        route_costs[idx2] += delta_r2
+                        current_cost += delta_cost
+
+                        if len(r1) <= 2:
+                            current_sol.pop(idx1)
+                            route_loads.pop(idx1)
+                            route_costs.pop(idx1)
+
+                        if current_cost < best_cost:
+                            best_sol = [r[:] for r in current_sol]
+                            best_cost = current_cost
+                            improved_this_temp = True
 
                 else:
-                    move_result = try_intra_swap(
-                        r1=r1,
-                        cost_r1=route_costs[idx1],
-                    )
+                    # Phép thử Intra-route Swap (tráo đổi 2 node nội bộ tuyến xe)
+                    if len(r1) < 4:
+                        continue
+                    i, j = random.sample(range(1, len(r1) - 1), 2)
+                    delta_cost = eval_intra_swap_delta(self.dist, r1, i, j)
 
-                if move_result is None or not move_result.accepted:
-                    continue
+                    accept = delta_cost < 0 or random.random() < math.exp(-min(delta_cost / T, 700.0))
+                    if accept:
+                        r1[i], r1[j] = r1[j], r1[i]
+                        route_costs[idx1] += delta_cost
+                        current_cost += delta_cost
 
-                new_r1 = route_cost(self.dist, r1)
-                new_r2 = route_cost(self.dist, r2) if move_type < 0.8 else None
-
-                v_delta = 0
-                if len(r1) <= 2:
-                    v_delta -= self.vehicle_penalty
-                if move_type < 0.8 and new_r2 is not None and len(r2) <= 2:
-                    v_delta -= self.vehicle_penalty
-
-                new_total = (
-                    current_cost - move_result.old_costs[0] + new_r1
-                    if move_type >= 0.8
-                    else current_cost - sum(move_result.old_costs) + new_r1 + (new_r2 or 0.0) + v_delta
-                )
-
-                delta = new_total - current_cost
-                accept = delta < 0 or random.random() < math.exp(-min(delta / T, 700.0))
-
-                if accept:
-                    current_cost = new_total
-                    route_costs[idx1] = new_r1
-                    if move_type < 0.8 and new_r2 is not None:
-                        route_costs[idx2] = new_r2
-
-                    if len(r1) <= 2:
-                        current_sol.pop(idx1)
-                        route_costs.pop(idx1)
-                        if idx2 > idx1:
-                            idx2 -= 1
-
-                    if current_cost < best_cost:
-                        best_sol = [r[:] for r in current_sol]
-                        best_cost = current_cost
-                        improved_this_temp = True
-                else:
-                    if move_result.rollback is not None:
-                        move_result.rollback()
+                        if current_cost < best_cost:
+                            best_sol = [r[:] for r in current_sol]
+                            best_cost = current_cost
+                            improved_this_temp = True
 
             no_improve_count = 0 if improved_this_temp else no_improve_count + 1
             T *= self.alpha

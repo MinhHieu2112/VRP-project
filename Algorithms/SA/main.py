@@ -1,45 +1,29 @@
-# File khởi chạy chính cho thuật toán Simulated Annealing (SA) giải quyết bài toán VRP.
+# File khởi chạy chính cho thuật toán Simulated Annealing sử dụng AlgorithmRunner chuẩn hóa.
+from __future__ import annotations
+
 import os
 import sys
-import json
-import time
 
-CURRENT_DIR  = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_DIR))
-sys.path.append(PROJECT_ROOT)
+_THIS_DIR    = os.path.dirname(os.path.realpath(__file__))
+PROJECT_ROOT = os.path.normpath(os.path.join(_THIS_DIR, '..', '..'))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
-from solver import SimulatedAnnealingSolver
-from Utils.Pipeline import load_data, build_result, save_result, visualize
-
-
-def load_config() -> dict:
-    # Đọc thông tin cấu hình thuật toán từ tệp config.json.
-    path = os.path.join(CURRENT_DIR, 'config.json')
-    with open(path, 'r', encoding='utf-8') as f:
-        return json.load(f)
+from Utils.Pipeline import AlgorithmRunner
+from Algorithms.SA.solver import SimulatedAnnealingSolver
 
 
-def run_sa():
-    # Thực hiện toàn bộ quy trình chạy tối ưu hóa bằng thuật toán SA và lưu kết quả.
-    print("\n===== RUN SIMULATED ANNEALING =====")
-    config = load_config()
-    data   = load_data(config)
+class SARunner(AlgorithmRunner):
+    """Runner đặc thù cho Simulated Annealing, chỉ cần định nghĩa cách xây dựng solver."""
 
-    solver = SimulatedAnnealingSolver(data, config)
-
-    start = time.time()
-    routes, total_cost_units = solver.solve()
-    elapsed = time.time() - start
-
-    result = build_result("SA", routes, total_cost_units, elapsed)
-
-    save_result(result, config, "SA")
-    visualize(result, config, "SA", data['df_locations'])
-
-    print(f"\n[SA DONE] {result['total_distance_km']:.2f} km | "
-          f"{result['num_vehicles']} xe | {elapsed:.2f}s")
-    return result
+    def build_solver(self, data, config):
+        # Khởi tạo solver SA từ dữ liệu và cấu hình được nạp sẵn bởi AlgorithmRunner.
+        return SimulatedAnnealingSolver(data, config)
 
 
 if __name__ == "__main__":
-    run_sa()
+    runner = SARunner(
+        name        = "SA",
+        config_path = os.path.join(_THIS_DIR, "config.json"),
+    )
+    runner.run()

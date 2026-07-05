@@ -272,32 +272,68 @@ def build_granular_lists(
 # Nhóm 5: Tiện ích xử lý nghiệm (validate, gộp tuyến)
 
 
+def _find_best_receiver(
+    solution: Solution,
+    last_load: float,
+    demands: Dict[int, float],
+    capacity: float,
+) -> int:
+    # Tìm kiếm tuyến đường tốt nhất trong nghiệm hiện tại để gộp một tuyến đường có tải trọng last_load (ưu tiên feasible, fallback là tải thấp nhất).
+    best_idx: int = -1
+    best_load: float = float("inf")
+    feasible_found = False
+
+    for i, route in enumerate(solution):
+        r_load = route_load(demands, route)
+        would_exceed = (r_load + last_load) > capacity
+
+        if not would_exceed:
+            if not feasible_found or r_load < best_load:
+                best_idx = i
+                best_load = r_load
+                feasible_found = True
+        elif not feasible_found and r_load < best_load:
+            best_idx = i
+            best_load = r_load
+
+    return best_idx
+
+
+def _merge_into(
+    solution: Solution,
+    receiver_idx: int,
+    last_route: Route,
+    last_load: float,
+    capacity: float,
+    demands: Dict[int, float],
+) -> None:
+    # Thực hiện gộp tuyến đường last_route vào tuyến đường tại receiver_idx và in cảnh báo nếu vi phạm tải trọng.
+    receiver = solution[receiver_idx]
+    recv_load = route_load(demands, receiver)
+    merged_load = recv_load + last_load
+
+    if merged_load > capacity:
+        print(
+            f"[local_search][WARN] Gộp route bắt buộc vào route[{receiver_idx}] "
+            f"vi phạm capacity: {merged_load:.0f} > {capacity:.0f}. "
+            f"Solution tạm thời infeasible — penalty sẽ xử lý sau."
+        )
+
+    solution[receiver_idx] = receiver[:-1] + last_route[1:]
+
+
 def merge_excess_routes_safe(
     solution:     Solution,
     max_vehicles: int,
     demands:      Dict[int, float],
     capacity:     float,
 ) -> Solution:
-    # Gộp các tuyến xe dư thừa sao cho tối thiểu hóa việc vượt tải trọng của xe.
+    # Điều phối gộp các tuyến xe dư thừa sao cho tối thiểu hóa việc vượt tải trọng của xe.
     while len(solution) > max_vehicles:
         last = solution.pop()
         last_load = route_load(demands, last)
-        best_idx: int = -1
-        best_load: float = float("inf")
-        feasible_found = False
 
-        for i, route in enumerate(solution):
-            r_load = route_load(demands, route)
-            would_exceed = (r_load + last_load) > capacity
-
-            if not would_exceed:
-                if not feasible_found or r_load < best_load:
-                    best_idx = i
-                    best_load = r_load
-                    feasible_found = True
-            elif not feasible_found and r_load < best_load:
-                best_idx = i
-                best_load = r_load
+        best_idx = _find_best_receiver(solution, last_load, demands, capacity)
 
         if best_idx == -1:
             warnings.warn(
@@ -307,18 +343,7 @@ def merge_excess_routes_safe(
             )
             break
 
-        receiver = solution[best_idx]
-        recv_load = route_load(demands, receiver)
-        merged_load = recv_load + last_load
-
-        if merged_load > capacity:
-            print(
-                f"[local_search][WARN] Gộp route bắt buộc vào route[{best_idx}] "
-                f"vi phạm capacity: {merged_load:.0f} > {capacity:.0f}. "
-                f"Solution tạm thời infeasible — penalty sẽ xử lý sau."
-            )
-
-        solution[best_idx] = receiver[:-1] + last[1:]
+        _merge_into(solution, best_idx, last, last_load, capacity, demands)
 
     solution[:] = [r for r in solution if len(r) > 2]
     return solution

@@ -12,19 +12,34 @@ class Ant:
         self.vehicle_load  = 0
         self.travel_path   = [start_index]
 
-        self._index_to_visit_set = set(range(graph.node_num))
-        self._index_to_visit_set.discard(start_index)
+        self.visited = [False] * graph.node_num
+        self.visited[start_index] = True
+        self.unvisited_count = graph.node_num - 1
 
+        self.total_travel_distance = 0.0
+
+    def reset(self):
+        # Thiết lập lại trạng thái của kiến về ban đầu để tái sử dụng (Object Pooling).
+        self.current_index = 0
+        self.vehicle_load  = 0
+        self.travel_path.clear()
+        self.travel_path.append(0)
+        
+        # Đặt lại danh sách các node đã thăm
+        for i in range(len(self.visited)):
+            self.visited[i] = False
+        self.visited[0] = True
+        self.unvisited_count = self.graph.node_num - 1
         self.total_travel_distance = 0.0
 
     @property
     def index_to_visit(self) -> list:
-        # Trả về danh sách các node chưa được thăm theo thứ tự tăng dần.
-        return sorted(self._index_to_visit_set)
+        # Trả về danh sách các node chưa được thăm dưới dạng list.
+        return [i for i, v in enumerate(self.visited) if not v]
 
     def index_to_visit_empty(self) -> bool:
         # Kiểm tra xem toàn bộ khách hàng đã được thăm hay chưa.
-        return len(self._index_to_visit_set) == 0
+        return self.unvisited_count == 0
 
     def move_to_next_index(self, next_index: int):
         # Di chuyển con kiến đến node tiếp theo và cập nhật trạng thái.
@@ -37,7 +52,9 @@ class Ant:
             self.vehicle_load = 0
         else:
             self.vehicle_load += self.graph.nodes[next_index].demand
-            self._index_to_visit_set.discard(next_index)
+            if not self.visited[next_index]:
+                self.visited[next_index] = True
+                self.unvisited_count -= 1
 
         self.current_index = next_index
 
@@ -49,7 +66,7 @@ class Ant:
                 <= self.graph.vehicle_capacity)
 
     def cal_next_index_meet_constrains(self) -> list:
-        # Tính danh sách các node khả thi thỏa mãn ràng buộc tải trọng.
+        # Tính danh sách các node chưa thăm thỏa mãn ràng buộc tải trọng.
         return [i for i in self.index_to_visit if self.check_condition(i)]
 
     def is_at_depot(self) -> bool:

@@ -3,11 +3,7 @@ from __future__ import annotations
 from typing import Dict, List, Tuple
 import numpy as np
 from Algorithms.Tabu.structures import Route, Solution
-from Utils.Operators.local_search import build_granular_lists, route_cost as _route_cost
-
-
-# build_granular_lists được tái sử dụng từ Utils.local_search
-__all__ = ["build_granular_lists"]
+from Utils.Operators.local_search import route_cost as _route_cost
 
 
 def build_caches(

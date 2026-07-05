@@ -138,28 +138,37 @@ class CVRPGraph:
             current_ind = next_ind
 
     def nearest_neighbor_heuristic(self):
-        # Xây dựng nghiệm ban đầu theo heuristic láng giềng gần nhất.
-        index_to_visit  = list(range(1, self.node_num))
+        # Xây dựng nghiệm ban đầu theo heuristic láng giềng gần nhất, sử dụng NumPy masked argmin để đạt O(N) mỗi bước.
+        n               = self.node_num
+        demands         = np.array([self.nodes[i].demand for i in range(n)], dtype=np.float32)
+        visited         = np.zeros(n, dtype=bool)
+        visited[0]      = True
         current_index   = 0
-        current_load    = 0
+        current_load    = 0.0
         travel_distance = 0.0
         travel_path     = [0]
+        remaining       = n - 1  # số khách hàng chưa thăm
 
-        while index_to_visit:
-            nearest = self._cal_nearest_next_index(
-                index_to_visit, current_index, current_load)
+        while remaining > 0:
+            row = self.node_dist_mat[current_index].copy()
+            # Che các node đã thăm và node vi phạm tải trọng
+            feasible_mask = (~visited) & ((current_load + demands) <= self.vehicle_capacity)
 
-            if nearest is None:
+            if not np.any(feasible_mask):
+                # Quay về depot khi không còn node khả thi
                 travel_distance += self.node_dist_mat[current_index][0]
                 travel_path.append(0)
                 current_index = 0
-                current_load  = 0
+                current_load  = 0.0
             else:
-                current_load    += self.nodes[nearest].demand
+                row[~feasible_mask] = np.inf
+                nearest = int(np.argmin(row))
+                current_load    += demands[nearest]
                 travel_distance += self.node_dist_mat[current_index][nearest]
                 travel_path.append(nearest)
-                current_index = nearest
-                index_to_visit.remove(nearest)
+                visited[nearest] = True
+                current_index    = nearest
+                remaining       -= 1
 
         travel_distance += self.node_dist_mat[current_index][0]
         travel_path.append(0)

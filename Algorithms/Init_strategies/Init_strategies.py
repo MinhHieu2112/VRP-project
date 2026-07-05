@@ -4,11 +4,9 @@ from __future__ import annotations
 import random
 import numpy as np
 from typing import Dict, List, Optional, Tuple
-from Utils.Operators.local_search import merge_excess_routes_safe, validate_solution
+from Utils.Operators.local_search import merge_excess_routes_safe, validate_solution, route_cost, Route, Solution
 
 KM_SCALE = 100
-Route    = List[int]
-Solution = List[Route]
 
 def _build_demands(num_nodes: int,
                    demands: Optional[Dict[int, float]],
@@ -20,12 +18,6 @@ def _build_demands(num_nodes: int,
     result = {i: demands.get(i, default_demand) for i in range(num_nodes)}
     result[0] = 0.0
     return result
-
-
-def _route_cost(route: Route, matrix: np.ndarray) -> float:
-    # Tính tổng khoảng cách nội bộ của một tuyến đường.
-    return float(sum(matrix[route[i], route[i + 1]]
-                     for i in range(len(route) - 1)))
 
 
 def _close_and_open(solution: Solution, current_route: Route) -> Route:
@@ -206,20 +198,16 @@ def init_solution(strategy: str,
 
     demands_map = _build_demands(num_nodes, demands, default_demand)
 
+    init_func = STRATEGY_MAP[strategy]
+    kwargs = {}
     if strategy == "random":
-        solution = random_init(
-            matrix, num_nodes, capacity, demands_map, max_vehicles, seed=seed)
-    elif strategy == "greedy":
-        solution = greedy_init(
-            matrix, num_nodes, capacity, demands_map, max_vehicles)
-    else:  # "clarke_wright"
-        solution = clarke_wright_init(
-            matrix, num_nodes, capacity, demands_map, max_vehicles)
+        kwargs["seed"] = seed
+    solution = init_func(matrix, num_nodes, capacity, demands_map, max_vehicles, **kwargs)
 
     if validate:
         is_valid, errors = validate_solution(
             solution, num_nodes, demands_map, capacity)
-        total_units = sum(_route_cost(r, matrix) for r in solution)
+        total_units = sum(route_cost(matrix, r) for r in solution)
         total_km    = total_units / KM_SCALE
 
         print(f"[Init:{strategy}] "
