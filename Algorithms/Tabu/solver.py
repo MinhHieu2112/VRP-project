@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Tuple, Any
 
 import numpy as np
 
-from Utils.vrp_utils import merge_excess_routes_safe
+from Utils.Operators.local_search import merge_excess_routes_safe, or_opt_intra
 from Algorithms.Tabu.structures import (
     AnyMove,
     Move2OptStar,
@@ -38,7 +38,6 @@ from Algorithms.Tabu.move_applier import (
     apply_relocate2,
     apply_swap,
 )
-
 
 class GranularTabuSearch:
     """Bộ giải tối ưu bài toán VRP sử dụng giải thuật Granular Tabu Search (GTS)."""
@@ -152,41 +151,9 @@ class GranularTabuSearch:
         return merge_excess_routes_safe(sol, self.max_v, self.demands, self.capacity)
 
     def _intra_or_opt(self, sol: Solution) -> Solution:
-        # Tối ưu hóa cục bộ nội tuyến (Or-opt-1) để làm mịn lộ trình.
-        d = self.matrix
-        for r in sol:
-            if len(r) <= 4:
-                continue
-            max_passes = 20
-            pass_count = 0
-            improved = True
-            while improved and pass_count < max_passes:
-                improved = False
-                pass_count += 1
-                n_r = len(r)
-                for i in range(1, n_r - 1):
-                    node = r[i]
-                    prev_i = r[i - 1]
-                    next_i = r[i + 1]
-                    gain_rm = d[prev_i, node] + d[node, next_i] - d[prev_i, next_i]
-                    best_gain = 1e-6
-                    best_j = -1
-                    for j in range(1, n_r - 1):
-                        if j == i or j == i - 1:
-                            continue
-                        prev_j = r[j - 1]
-                        next_j = r[j]
-                        gain_ins = d[prev_j, node] + d[node, next_j] - d[prev_j, next_j]
-                        gain = gain_rm - gain_ins
-                        if gain > best_gain:
-                            best_gain = gain
-                            best_j = j
-                    if best_j != -1:
-                        r.pop(i)
-                        ins = best_j if best_j < i else best_j - 1
-                        r.insert(ins, node)
-                        improved = True
-                        break
+        # Tối ưu hóa cục bộ nội tuyến Or-opt-1 bằng cách gọi Utils.local_search.or_opt_intra.
+        for idx, r in enumerate(sol):
+            sol[idx] = or_opt_intra(self.matrix, r)
         return sol
 
     def _explore_relocate1(
@@ -360,6 +327,32 @@ class GranularTabuSearch:
 
         return local_best_delta, local_best_move, local_best_key, found_early_exit
 
+    def _compute_route_suffix_demands(self, route: Route) -> List[float]:
+        # Tính suffix sum cho tuyến đường
+        n_r = len(route)
+        suffixes = [0.0] * n_r
+        val = 0.0
+        for idx in range(n_r - 1, -1, -1):
+            node = route[idx]
+            if node != 0:
+                val += self._demands_arr[node]
+            suffixes[idx] = val
+        return suffixes
+
+    def _build_suffix_demands(self, sol: Solution) -> Dict[int, List[float]]:
+        # Xây dựng mảng suffix demands cho toàn bộ nghiệm
+        suffix_demands = {}
+        for r_idx, r in enumerate(sol):
+            suffix_demands[r_idx] = self._compute_route_suffix_demands(r)
+        return suffix_demands
+
+    def _update_pos_map_for_routes(self, pos_map: dict, curr_sol: list, route_indices: list):
+        # Cập nhật gia tăng pos_map cho các route được chỉ định
+        for r_idx in route_indices:
+            for p_idx, node in enumerate(curr_sol[r_idx]):
+                if node != 0:
+                    pos_map[node] = (r_idx, p_idx)
+
     def _explore_2optstar(
         self,
         u: int,
@@ -373,8 +366,9 @@ class GranularTabuSearch:
         iteration: int,
         tabu_dict: dict,
         best_move_delta: float,
+        suffix_demands: dict,
     ) -> tuple[float, Optional[Move2OptStar], Optional[tuple]]:
-        # Tìm kiếm dịch chuyển 2-opt* tốt nhất cho nút u.
+        # Tìm kiếm dịch chuyển 2-opt* tốt nhất cho nút u sử dụng suffix_demands O(1).
         local_best_delta = best_move_delta
         local_best_move = None
         local_best_key = None
@@ -393,7 +387,7 @@ class GranularTabuSearch:
                 r_v,
                 p_v,
                 self.matrix,
-                self._demands_arr,
+                suffix_demands,
                 self.capacity,
                 self.lam,
                 self._avg_edge,
@@ -425,6 +419,10 @@ class GranularTabuSearch:
         iteration = 0
         infeasible_count = 0
 
+        # Khởi tạo pos_map và suffix_demands một lần trước vòng lặp chính
+        pos_map = node_positions(curr_sol)
+        suffix_demands = self._build_suffix_demands(curr_sol)
+
         print(
             f"[GTS] Bắt đầu: {len(curr_sol)} xe | {best_dist / 100:.2f} km | λ={self.lam:.1f} | "
             f"max_iter={self.max_iter} | max_no_improve={self.max_no_improve}"
@@ -449,9 +447,10 @@ class GranularTabuSearch:
                     curr_sol = perturbed
                     route_loads = p_loads
                     route_dists = p_dists
+                    # Rebuild pos_map và suffix_demands cho perturbed solution mới
+                    pos_map = node_positions(curr_sol)
+                    suffix_demands = self._build_suffix_demands(curr_sol)
 
-            clean_empty_routes(curr_sol, route_loads, route_dists)
-            pos_map = node_positions(curr_sol)
             base_cost = penalized_cost_cached(
                 curr_sol, route_loads, route_dists, self.capacity, self.lam
             )
@@ -522,7 +521,7 @@ class GranularTabuSearch:
                 # 4. 2-opt*
                 best_move_delta, m_2opts, k_2opts = self._explore_2optstar(
                     u, r_u, p_u, pos_map, curr_sol, route_loads,
-                    base_cost, best_dist, iteration, tabu_dict, best_move_delta
+                    base_cost, best_dist, iteration, tabu_dict, best_move_delta, suffix_demands
                 )
                 if m_2opts is not None:
                     best_move = m_2opts
@@ -534,6 +533,7 @@ class GranularTabuSearch:
                 iteration += 1
                 continue
 
+            affected_routes = []
             if best_move_type == "rel1":
                 assert isinstance(best_move, MoveRel1)
                 apply_relocate(
@@ -548,6 +548,7 @@ class GranularTabuSearch:
                     self.matrix,
                     self._demands_arr,
                 )
+                affected_routes = [best_move.r_src, best_move.r_dst]
             elif best_move_type == "rel2":
                 assert isinstance(best_move, MoveRel2)
                 apply_relocate2(
@@ -563,6 +564,7 @@ class GranularTabuSearch:
                     self.matrix,
                     self._demands_arr,
                 )
+                affected_routes = [best_move.r_src, best_move.r_dst]
             elif best_move_type == "swap":
                 assert isinstance(best_move, MoveSwap)
                 apply_swap(
@@ -578,6 +580,7 @@ class GranularTabuSearch:
                     self.matrix,
                     self._demands_arr,
                 )
+                affected_routes = [best_move.r_u, best_move.r_v]
             elif best_move_type == "2opts":
                 assert isinstance(best_move, Move2OptStar)
                 apply_2opt_star(
@@ -591,8 +594,23 @@ class GranularTabuSearch:
                     self.matrix,
                     self._demands_arr,
                 )
+                affected_routes = [best_move.r1, best_move.r2]
 
-            clean_empty_routes(curr_sol, route_loads, route_dists)
+            # Dọn dẹp các tuyến trống chỉ khi có tuyến bị trống thực tế (len <= 2)
+            need_clean = False
+            for r_idx in affected_routes:
+                if len(curr_sol[r_idx]) <= 2:
+                    need_clean = True
+                    break
+
+            if need_clean:
+                clean_empty_routes(curr_sol, route_loads, route_dists)
+                pos_map = node_positions(curr_sol)
+                suffix_demands = self._build_suffix_demands(curr_sol)
+            else:
+                self._update_pos_map_for_routes(pos_map, curr_sol, affected_routes)
+                for r_idx in affected_routes:
+                    suffix_demands[r_idx] = self._compute_route_suffix_demands(curr_sol[r_idx])
 
             tenure = random.randint(self.tau_min, self.tau_max)
             tabu_dict[best_move_key] = iteration + tenure

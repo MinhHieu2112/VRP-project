@@ -1,7 +1,7 @@
 {
     "paths": {
-        "distance_matrix": "Data/orsm_matrix.csv",
-        "locations_data":  "Data/locations.csv",
+        "distance_matrix": "Data/Clean/orsm_matrix_1000.csv",
+        "locations_data":  "Data/Clean/locations.csv",
         "output_dir":      "Results"
     },
     "global_constraints": {
@@ -9,7 +9,8 @@
         "vehicle_capacity":     10,
         "default_demand":       1,
         "penalty_unassigned":   100000,
-        "penalty_vehicle_over": 50000
+        "penalty_vehicle_over": 50000,
+        "vehicle_penalty":      3000
     },
     "visualization": {
         "osrm_url":     "http://localhost:5001",
@@ -32,6 +33,7 @@
         "vehicle_capacity":     10,
         "default_demand":       1,
         "penalty_unassigned":   100000,
-        "penalty_vehicle_over": 50000
+        "penalty_vehicle_over": 50000,
+        "vehicle_penalty":      3000
     }
 }

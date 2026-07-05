@@ -1,7 +1,7 @@
 # Lớp bọc thực thi thuật toán tối ưu hóa VRP bằng thư viện PyVRP (Hybrid Genetic Search).
 import random
 from pyvrp import Model
-from pyvrp.stop import NoImprovement, MaxIterations, MultipleCriteria
+from pyvrp.stop import NoImprovement
 
 
 class PyVRPSolver:

@@ -9,9 +9,7 @@ sys.path.append(_PROJECT_ROOT)
 from Models.cvrp_base import CVRPGraph, Node
 from Core.engine import BasicACO
 from Algorithms.Init_strategies.Init_strategies import init_solution
-from Utils.Data_loader import DataLoader
-from Utils.ResultHandler import ResultHandler
-from Utils.Visualizer import Visualizer
+from Utils.Pipeline import DataLoader, ResultHandler, Visualizer
 
 KM_SCALE = 100
 

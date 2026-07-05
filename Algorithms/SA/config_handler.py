@@ -66,7 +66,7 @@ def load_sa_config(config: dict) -> SAConfig:
         max_no_improve  = int(sa_cfg.get("max_no_improve",    1000)),
         iter_per_T      = int(sa_cfg.get("iter_per_temp",      500)),
         init_strategy   = str(sa_cfg.get("init_strategy", "clarke_wright")),
-        vehicle_penalty = int(sa_cfg.get("vehicle_penalty",   3000)),
+        vehicle_penalty = int(sa_cfg.get("vehicle_penalty", cons.get("vehicle_penalty", 3000))),
     )
 
 

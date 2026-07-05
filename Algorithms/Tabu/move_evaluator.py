@@ -124,19 +124,19 @@ def eval_swap(
 
 
 def eval_2opt_star(
-    sol:         Solution,
-    route_loads: Dict[int, float],
-    r1:          int,
-    i:           int,
-    r2:          int,
-    j:           int,
-    matrix:      np.ndarray,
-    demands_arr: np.ndarray,
-    capacity:    float,
-    lam:         float,
-    avg_edge:    float,
+    sol:            Solution,
+    route_loads:    Dict[int, float],
+    r1:             int,
+    i:              int,
+    r2:             int,
+    j:              int,
+    matrix:         np.ndarray,
+    suffix_demands: Dict[int, list[float]],
+    capacity:       float,
+    lam:            float,
+    avg_edge:       float,
 ) -> Optional[float]:
-    # Tính toán sự thay đổi chi phí khi thực hiện phép lai chéo 2-opt* cắt nối đuôi tuyến.
+    # Tính toán sự thay đổi chi phí khi thực hiện phép lai chéo 2-opt* cắt nối đuôi tuyến sử dụng suffix_demands tối ưu O(1).
     route1 = sol[r1]
     route2 = sol[r2]
 
@@ -156,8 +156,8 @@ def eval_2opt_star(
     if delta > avg_edge * 2:
         return None
 
-    tail1_load = float(sum(demands_arr[x] for x in route1[i + 1:] if x != 0))
-    tail2_load = float(sum(demands_arr[x] for x in route2[j + 1:] if x != 0))
+    tail1_load = suffix_demands[r1][i + 1]
+    tail2_load = suffix_demands[r2][j + 1]
     head1_load = route_loads[r1] - tail1_load
     head2_load = route_loads[r2] - tail2_load
 

@@ -76,7 +76,6 @@ def solve_acvrp_milp(matrix, demands, num_vehicles, capacity, timelimit=120):
                   f"Lower bound LP: {obj_val}. Trả về None.")
             return status_str, None, []
 
-    #  [FIX-2] Extract routes chỉ khi có feasible solution 
     routes_info = _extract_routes_mtz(x, nodes, customers, demands, capacity)
     return status_str, obj_val, routes_info
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 import random
 from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
 
+from Utils.Operators.local_search import route_load
+
 Route = List[int]
 
 
@@ -30,8 +32,8 @@ def try_swap(
     d1    = demands_map.get(node1, 0.0)
     d2    = demands_map.get(node2, 0.0)
 
-    load_r1 = sum(demands_map.get(n, 0.0) for n in r1 if n != 0)
-    load_r2 = sum(demands_map.get(n, 0.0) for n in r2 if n != 0)
+    load_r1 = route_load(demands_map, r1)
+    load_r2 = route_load(demands_map, r2)
 
     new_load_r1 = load_r1 - d1 + d2
     new_load_r2 = load_r2 - d2 + d1
@@ -63,7 +65,7 @@ def try_relocate(
     # Thử chuyển một khách hàng từ tuyến đường này sang tuyến đường kia.
     node   = r1[idx1]
     d_node = demands_map.get(node, 0.0)
-    load_r2 = sum(demands_map.get(n, 0.0) for n in r2 if n != 0)
+    load_r2 = route_load(demands_map, r2)
 
     if load_r2 + d_node > capacity:
         return MoveResult(accepted=False, old_costs=(), rollback=None)

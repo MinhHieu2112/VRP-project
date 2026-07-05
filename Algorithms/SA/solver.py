@@ -7,7 +7,7 @@ import numpy as np
 from typing import Dict, List, Tuple
 from Algorithms.Init_strategies.Init_strategies import init_solution
 from Algorithms.SA.config_handler import load_sa_config, SAConfig
-from Algorithms.SA.cost_evaluator import route_cost, route_load, total_cost, build_route_costs
+from Algorithms.SA.cost_evaluator import route_cost, build_route_costs
 from Algorithms.SA.moves import try_swap, try_relocate, try_intra_swap
 
 KM_SCALE = 100

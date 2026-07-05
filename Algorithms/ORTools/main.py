@@ -11,10 +11,6 @@ PROJECT_ROOT = os.path.dirname(_ALGOS_DIR)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-if sys.platform == 'win32':
-    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
-
 from Utils.Pipeline import load_data, build_result, save_result, visualize
 from Algorithms.ORTools.solver.solver_OR_Tools import ORToolsSolver
 

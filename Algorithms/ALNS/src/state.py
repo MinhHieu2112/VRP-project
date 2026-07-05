@@ -1,14 +1,15 @@
-# File định nghĩa lớp biểu diễn trạng thái lời giải CvrpState phục vụ cho ALNS.
+# Định nghĩa lớp CvrpState lưu trữ trạng thái của lời giải CVRP trong thuật toán ALNS.
 import copy
 import sys
 from alns import State
 import numpy as np
+from Utils.Operators.local_search import route_cost as _route_cost, or_opt_intra
 
 class CvrpState(State):
-    """Trạng thái lời giải CVRP chứa danh sách các tuyến đường và khách hàng chưa gán."""
+    # Lớp đại diện cho trạng thái lời giải CVRP chứa danh sách các tuyến đường và chi phí tương ứng.
 
     def __init__(self, routes, unassigned, distance_matrix, capacity, demands, config):
-        # Khởi tạo các thuộc tính của trạng thái lời giải và tính toán tải trọng các tuyến.
+        # Khởi tạo các thuộc tính của trạng thái lời giải và tính toán tải trọng cùng chi phí các tuyến.
         self.routes = routes
         self.unassigned = unassigned
         self.distance_matrix = distance_matrix
@@ -16,10 +17,11 @@ class CvrpState(State):
         self.demands = demands
         self.config = config
         self.route_loads = [sum(demands[node] for node in r if node != 0) for r in routes]
+        self.route_costs = [self.route_cost(r) for r in routes]
 
     def objective(self):
-        # Tính tổng quãng đường di chuyển cộng với các khoản phạt vi phạm ràng buộc.
-        total_distance = sum(self.route_cost(route) for route in self.routes)
+        # Lấy tổng chi phí di chuyển đã được cache cộng với các khoản phạt vi phạm ràng buộc.
+        total_distance = sum(self.route_costs)
 
         constraints = self.config.get("constraints", {})
         penalty_node    = constraints.get("penalty_unassigned", 50_000_000)
@@ -37,12 +39,11 @@ class CvrpState(State):
         return total_distance + total_penalty + vehicle_penalty
 
     def apply_2opt(self):
-        # Thực hiện thuật toán Or-opt nội tuyến làm mịn lộ trình mà không làm đảo cung bất đối xứng.
+        # Tối ưu hóa nội tuyến tất cả các tuyến đường bằng cách gọi Utils.local_search.or_opt_intra.
         import sys
-
-        new_routes = []
         active = [r for r in self.routes if len(r) > 2]
         total  = len(active)
+        new_routes = []
 
         for idx, route in enumerate(active):
             percent  = (idx + 1) / total * 100
@@ -51,70 +52,18 @@ class CvrpState(State):
             sys.stdout.write(
                 f"\r  Progress: [{bar}] {percent:.1f}% (Xe {idx+1}/{total})")
             sys.stdout.flush()
-
-            if len(route) <= 3:
-                new_routes.append(route)
-                continue
-
-            best_route = route[:]
-            improved   = True
-            max_iters  = 50
-
-            while improved and max_iters > 0:
-                improved  = False
-                max_iters -= 1
-
-                for i in range(1, len(best_route) - 1):
-                    node  = best_route[i]
-                    prev_i = best_route[i - 1]
-                    next_i = best_route[i + 1]
-
-                    cost_remove = (
-                        self.distance_matrix[prev_i, node]
-                        + self.distance_matrix[node, next_i]
-                        - self.distance_matrix[prev_i, next_i]
-                    )
-
-                    best_gain = 0
-                    best_j    = -1
-
-                    for j in range(1, len(best_route) - 1):
-                        if j == i or j == i - 1:
-                            continue
-                        prev_j = best_route[j - 1]
-                        next_j = best_route[j]
-
-                        cost_insert = (
-                            self.distance_matrix[prev_j, node]
-                            + self.distance_matrix[node, next_j]
-                            - self.distance_matrix[prev_j, next_j]
-                        )
-
-                        gain = cost_remove - cost_insert
-                        if gain > best_gain + 1e-6:
-                            best_gain = gain
-                            best_j    = j
-
-                    if best_j != -1:
-                        route_tmp = best_route[:]
-                        route_tmp.pop(i)
-                        insert_at = best_j if best_j < i else best_j - 1
-                        route_tmp.insert(insert_at, node)
-                        best_route = route_tmp
-                        improved   = True
-                        break
-
-            new_routes.append(best_route)
+            new_routes.append(or_opt_intra(self.distance_matrix, route))
 
         self.routes = new_routes
         self.route_loads = [
             sum(self.demands[node] for node in r if node != 0)
             for r in self.routes
         ]
+        self.route_costs = [self.route_cost(r) for r in self.routes]
         print("\n[XONG] Đã xong toàn bộ lộ trình.")
 
     def copy(self):
-        # Sao chép sâu trạng thái lời giải hiện tại.
+        # Sao chép sâu trạng thái lời giải hiện tại cùng cache khoảng cách và tải trọng.
         new_state = object.__new__(CvrpState)
         new_state.routes            = [r[:] for r in self.routes]
         new_state.unassigned        = self.unassigned[:]
@@ -123,6 +72,7 @@ class CvrpState(State):
         new_state.demands           = self.demands
         new_state.config            = self.config
         new_state.route_loads       = self.route_loads[:]
+        new_state.route_costs       = self.route_costs[:]
         return new_state
 
     @property
@@ -142,8 +92,5 @@ class CvrpState(State):
         return True
 
     def route_cost(self, route):
-        # Tính toán chi phí khoảng cách thực tế của một tuyến đường cụ thể.
-        cost = 0
-        for i in range(len(route) - 1):
-            cost += self.distance_matrix[route[i], route[i + 1]]
-        return cost
+        # Gọi Utils.local_search.route_cost để tính chi phí một tuyến đường (tương thích bất đối xứng).
+        return _route_cost(self.distance_matrix, route)

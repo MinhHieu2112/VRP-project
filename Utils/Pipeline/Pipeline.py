@@ -5,12 +5,13 @@ FIXES:
 """
 
 import os
-from Utils.Data_loader import DataLoader
-from Utils.ResultHandler import ResultHandler
-from Utils.Visualizer import Visualizer
+from .Data_loader import DataLoader
+from .ResultHandler import ResultHandler
+from .Visualizer import Visualizer
 
-_THIS_FILE   = os.path.realpath(__file__)   # [FIX-4]
-_UTILS_DIR   = os.path.dirname(_THIS_FILE)
+_THIS_FILE   = os.path.realpath(__file__)
+_PIPELINE_DIR = os.path.dirname(_THIS_FILE)
+_UTILS_DIR   = os.path.dirname(_PIPELINE_DIR)
 PROJECT_ROOT = os.path.dirname(_UTILS_DIR)
 KM_SCALE     = DataLoader.KM_SCALE
 

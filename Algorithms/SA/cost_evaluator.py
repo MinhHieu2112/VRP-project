@@ -1,21 +1,12 @@
-# File chứa các hàm tính toán khoảng cách, tải trọng và ràng buộc của các tuyến đường.
+# Wrapper mỏng tái sử dụng các hàm tính chi phí từ Utils.local_search thay vì triển khai lại.
 from __future__ import annotations
 import numpy as np
 from typing import Dict, List
 
+from Utils.Operators.local_search import route_cost, route_load
+
 Route    = List[int]
 Solution = List[Route]
-
-def route_cost(dist: np.ndarray, route: Route) -> float:
-    # Tính tổng khoảng cách thực tế của một tuyến đường.
-    return float(
-        sum(dist[route[i], route[i + 1]] for i in range(len(route) - 1))
-    )
-
-
-def route_load(demands_map: Dict[int, float], route: Route) -> float:
-    # Tính tổng lượng hàng khách hàng yêu cầu trên một tuyến đường.
-    return sum(demands_map.get(n, 0.0) for n in route if n != 0)
 
 
 def total_cost(

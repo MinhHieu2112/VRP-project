@@ -1,36 +1,13 @@
-# File chứa các hàm tiện ích quản lý cache, vị trí node và xây dựng danh sách lân cận Granular.
+# File chứa các hàm tiện ích quản lý cache, vị trí node và danh sách lân cận Granular dành riêng cho Tabu.
 from __future__ import annotations
 from typing import Dict, List, Tuple
 import numpy as np
 from Algorithms.Tabu.structures import Route, Solution
+from Utils.Operators.local_search import build_granular_lists, route_cost as _route_cost
 
 
-def build_granular_lists(
-    matrix:        np.ndarray,
-    n:             int,
-    granular_beta: float,
-    granular_k:    int,
-) -> Dict[int, List[int]]:
-    # Xây dựng danh sách lân cận giới hạn (granular neighborhood) cho từng khách hàng.
-    customers = list(range(1, n))
-    depot_dists = matrix[0, 1:].astype(float)
-    avg_dist = float(np.mean(depot_dists[depot_dists > 0])) if len(depot_dists) > 0 else 1.0
-    threshold = granular_beta * avg_dist * 2
-    neighbors: Dict[int, List[int]] = {}
-    for i in customers:
-        row = matrix[i].astype(float)
-        eligible = [j for j in customers if j != i and row[j] <= threshold]
-        if len(eligible) < granular_k:
-            k_part = min(granular_k + 2, n)
-            part_indices = np.argpartition(row, k_part - 1)[:k_part]
-            sorted_part = part_indices[np.argsort(row[part_indices])]
-            eligible = [int(j) for j in sorted_part if j != 0 and j != i][:granular_k]
-        else:
-            eligible.sort(key=lambda j: row[j])
-            eligible = eligible[:granular_k]
-        neighbors[i] = eligible
-
-    return neighbors
+# build_granular_lists được tái sử dụng từ Utils.local_search
+__all__ = ["build_granular_lists"]
 
 
 def build_caches(
@@ -48,10 +25,8 @@ def build_caches(
 
 
 def route_dist_raw(route: Route, matrix: np.ndarray) -> float:
-    # Tính tổng khoảng cách thực tế của một tuyến đường trực tiếp từ ma trận.
-    if len(route) <= 2:
-        return 0.0
-    return float(sum(matrix[route[i], route[i + 1]] for i in range(len(route) - 1)))
+    # Tính tổng khoảng cách thực tế của một tuyến đường — wrapper gọi Utils.local_search.route_cost.
+    return _route_cost(matrix, route)
 
 
 def total_cost_cached(route_dists: Dict[int, float]) -> float:

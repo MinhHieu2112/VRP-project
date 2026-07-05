@@ -75,8 +75,6 @@ class MatrixCleaner:
 # ==============================
 if __name__ == "__main__":
     # Khởi tạo cleaner
-    # precision_factor=1: giữ nguyên mét
-    # precision_factor=10: giữ đến hàng decimet (solver sẽ hiểu 12.3m là 123)
     cleaner = MatrixCleaner(
         matrix_path="../Data/haversine_matrix.csv",
         loc_path="../Data/locations.csv",

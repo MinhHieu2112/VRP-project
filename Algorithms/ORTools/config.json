@@ -4,8 +4,8 @@
         "description": "Config riêng cho OR-Tools, tuân thủ key schema của Utils/config.json"
     },
     "paths": {
-        "distance_matrix": "Data/orsm_matrix.csv",
-        "locations_data":  "Data/locations.csv",
+        "distance_matrix": "Data/Clean/orsm_matrix_1000.csv",
+        "locations_data":  "Data/Clean/locations.csv",
         "output_dir":      "Results"
     },
     "common_model_parameters": {

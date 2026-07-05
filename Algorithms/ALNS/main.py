@@ -18,7 +18,7 @@ from src.state import CvrpState
 from src.solver import configure_alns
 
 class NoImprovementStop:
-    """Điều kiện dừng khi hàm mục tiêu không cải thiện sau số vòng lặp tối đa."""
+    # Điều kiện dừng khi hàm mục tiêu không cải thiện sau số vòng lặp tối đa.
 
     def __init__(self, max_no_improve: int):
         # Khởi tạo giới hạn số vòng lặp và bộ đếm không cải thiện.
@@ -52,7 +52,7 @@ def load_config(path: Optional[str] = None) -> dict:
 
 
 def build_initial_state(data: dict, config: dict) -> CvrpState:
-    # Khởi tạo trạng thái nghiệm ban đầu cho mô hình VRP.
+    # Khởi tạo trạng thái nghiệm ban đầu cho mô hình VRP đồng thời dựng candidate list.
     matrix   = data['distance_matrix']
     capacity = data['vehicle_capacity']
     demands_arr = data['demands']
@@ -61,7 +61,13 @@ def build_initial_state(data: dict, config: dict) -> CvrpState:
     demands_dict = {i: int(demands_arr[i]) for i in range(num_nodes)}
     constraints  = config.get('global_constraints') or config.get('constraints') or {}
 
+    from Algorithms.Tabu.utils import build_granular_lists
     alns_cfg      = config.get('alns_parameters') or {}
+    granular_beta = alns_cfg.get('granular_beta', 1.5)
+    granular_k    = alns_cfg.get('granular_k', 20)
+    print(f"[ALNS] Xây dựng candidate list granular: β={granular_beta}, k={granular_k}")
+    config["granular_neighbors"] = build_granular_lists(matrix, num_nodes, granular_beta, granular_k)
+
     init_strategy = alns_cfg.get('init_strategy', 'clarke_wright')
     print(f"[ALNS] Khởi tạo nghiệm bằng chiến lược: '{init_strategy}'")
 
@@ -104,8 +110,7 @@ def main():
     capacity = data['vehicle_capacity']
 
     init_state   = build_initial_state(data, config)
-    init_cost_km = sum(init_state.route_cost(r)
-                       for r in init_state.routes) / KM_SCALE
+    init_cost_km = sum(init_state.route_costs) / KM_SCALE
 
     print(f"[*] {matrix.shape[0]-1} khách hàng | "
           f"{len(init_state.routes)} xe ban đầu | capacity={capacity}")
@@ -123,8 +128,7 @@ def main():
 
     def on_best(state, _rnd):
         # Cập nhật kết quả tốt nhất khi tìm thấy lời giải cải tiến.
-        km = sum(state.route_cost(r)
-                 for r in state.routes if len(r) > 2) / KM_SCALE
+        km = sum(state.route_costs) / KM_SCALE
         shared[0]  = km
         shared[1]  = len(state.unassigned)
         shared[2] += 1
@@ -155,7 +159,7 @@ def main():
     elapsed = time.time() - start_time
 
     active_routes    = [r for r in best_state.routes if len(r) > 2]
-    total_cost_units = sum(best_state.route_cost(r) for r in active_routes)
+    total_cost_units = sum(best_state.route_costs)
 
     result = build_result("ALNS", active_routes, total_cost_units, elapsed)
 

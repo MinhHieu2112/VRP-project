@@ -1,6 +1,5 @@
 # File định nghĩa bộ cấu hình và điều phối các toán tử trong thuật toán ALNS.
 from __future__ import annotations
-
 from typing import TYPE_CHECKING, cast
 
 import numpy.random as rnd

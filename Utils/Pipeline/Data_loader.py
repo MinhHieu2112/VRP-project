@@ -2,8 +2,9 @@ import pandas as pd
 import numpy as np
 import os
 
-_THIS_FILE   = os.path.realpath(__file__)         
-_UTILS_DIR   = os.path.dirname(_THIS_FILE)
+_THIS_FILE   = os.path.realpath(__file__)
+_PIPELINE_DIR = os.path.dirname(_THIS_FILE)
+_UTILS_DIR   = os.path.dirname(_PIPELINE_DIR)
 PROJECT_ROOT = os.path.dirname(_UTILS_DIR)
 
 

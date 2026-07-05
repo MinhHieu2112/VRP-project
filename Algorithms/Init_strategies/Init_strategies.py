@@ -4,7 +4,7 @@ from __future__ import annotations
 import random
 import numpy as np
 from typing import Dict, List, Optional, Tuple
-from Utils.vrp_utils import merge_excess_routes_safe, validate_solution
+from Utils.Operators.local_search import merge_excess_routes_safe, validate_solution
 
 KM_SCALE = 100
 Route    = List[int]
@@ -62,7 +62,6 @@ def random_init(matrix: np.ndarray,
         current_route.append(0)
         solution.append(current_route)
 
-    # [DRY-FIX] Dùng hàm util chung — có kiểm tra capacity khi gộp
     return merge_excess_routes_safe(solution, max_vehicles, demands_map, capacity)
 
 
@@ -120,7 +119,7 @@ def greedy_init(matrix: np.ndarray,
         for node in remaining:
             solution[-1].insert(-1, int(node))
 
-    return solution
+    return merge_excess_routes_safe(solution, max_vehicles, demands_map, capacity)
 
 
 def clarke_wright_init(matrix: np.ndarray,
@@ -218,13 +217,11 @@ def init_solution(strategy: str,
             matrix, num_nodes, capacity, demands_map, max_vehicles)
 
     if validate:
-        # [DRY-FIX] Dùng validate_solution từ Utils.vrp_utils
         is_valid, errors = validate_solution(
             solution, num_nodes, demands_map, capacity)
         total_units = sum(_route_cost(r, matrix) for r in solution)
         total_km    = total_units / KM_SCALE
 
-        # [FIX-UNIT] In đúng đơn vị: units và km (không phải "m")
         print(f"[Init:{strategy}] "
               f"{len(solution)} xe | "
               f"{total_units:.0f} units ({total_km:.2f} km) | "
