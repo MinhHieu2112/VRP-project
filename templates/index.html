@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ACVRP - Optimizer Dashboard</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="dashboard">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="brand">
+                <div class="brand-icon">
+                    <i class="ph-fill ph-truck"></i>
+                </div>
+                <div>
+                    <h1>ACVRP</h1>
+                    <p>Route Optimizer</p>
+                </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <form id="runForm" class="control-panel">
+                
+                <div class="input-group">
+                    <label>Thuật toán tối ưu</label>
+                    <div class="custom-select-wrapper" id="algoDropdownWrapper">
+                        <div class="custom-select-display" id="algoDisplay">
+                            <div class="selected-content">
+                                <i class="ph ph-cpu text-primary"></i>
+                                <span id="algoSelectedText">Đang tải dữ liệu...</span>
+                            </div>
+                            <i class="ph ph-caret-down text-muted"></i>
+                        </div>
+                        <div class="custom-select-options" id="algoOptions">
+                            <!-- Options injected by JS -->
+                        </div>
+                        <input type="hidden" name="algorithm" id="algorithm" required>
+                    </div>
+                </div>
+
+                <div class="input-group mt-4">
+                    <label>Số lượng điểm giao hàng</label>
+                    <div class="custom-select-wrapper" id="pointsDropdownWrapper">
+                        <div class="custom-select-display" id="pointsDisplay">
+                            <div class="selected-content">
+                                <i class="ph ph-map-pin text-primary"></i>
+                                <span id="pointsSelectedText">50 điểm</span>
+                            </div>
+                            <i class="ph ph-caret-down text-muted"></i>
+                        </div>
+                        <div class="custom-select-options" id="pointsOptions">
+                            <div class="custom-option" data-value="10">10 điểm</div>
+                            <div class="custom-option selected" data-value="50">50 điểm</div>
+                            <div class="custom-option" data-value="100">100 điểm</div>
+                            <div class="custom-option" data-value="200">200 điểm (Giới hạn MILP)</div>
+                            <div class="custom-option" data-value="500">500 điểm</div>
+                            <div class="custom-option" data-value="1000">1000 điểm</div>
+                            <div class="custom-option" data-value="1600">1600 điểm (Tối đa)</div>
+                        </div>
+                        <input type="hidden" name="numPoints" id="numPoints" value="50" required>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn-primary mt-6" id="runBtn">
+                    <span><i class="ph-bold ph-play"></i> Bắt đầu tối ưu</span>
+                </button>
+            </form>
+
+            <div class="status-box" id="statusContainer" style="display: none;">
+                <div class="loader"></div>
+                <p id="statusText">Hệ thống đang xử lý...</p>
+            </div>
+
+            <!-- Terminal Log Container -->
+            <div class="log-container mt-6" id="logContainer" style="display: none;">
+                <div class="log-header">
+                    <h3 class="log-title"><i class="ph-bold ph-terminal"></i> System Log</h3>
+                    <button type="button" class="log-expand-btn" id="logExpandBtn" title="Phóng to/Thu nhỏ">
+                        <i class="ph-bold ph-arrows-out"></i>
+                    </button>
+                </div>
+                <pre class="log-content" id="logContent"></pre>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="content">
+            <!-- Topbar (Optional, can be used for global state/time) -->
+            <header class="topbar">
+                <h2 class="page-title">Tổng quan lộ trình</h2>
+                <div class="time-badge">
+                    <i class="ph ph-clock"></i> <span id="currentTime">Loading...</span>
+                </div>
+            </header>
+
+            <!-- Metrics Grid -->
+            <div class="metrics-grid" id="metricsGrid" style="display: none;">
+                <div class="metric-card">
+                    <div class="metric-icon-box bg-blue">
+                        <i class="ph-fill ph-ruler"></i>
+                    </div>
+                    <div class="metric-info">
+                        <p class="metric-label">TỔNG QUÃNG ĐƯỜNG</p>
+                        <h3 class="metric-value"><span id="valDistance">0</span> <small>km</small></h3>
+                    </div>
+                </div>
+                
+                <div class="metric-card">
+                    <div class="metric-icon-box bg-emerald">
+                        <i class="ph-fill ph-clock"></i>
+                    </div>
+                    <div class="metric-info">
+                        <p class="metric-label">THỜI GIAN CHẠY</p>
+                        <h3 class="metric-value"><span id="valTime">0</span> <small>s</small></h3>
+                    </div>
+                </div>
+                
+                <div class="metric-card">
+                    <div class="metric-icon-box bg-amber">
+                        <i class="ph-fill ph-truck"></i>
+                    </div>
+                    <div class="metric-info">
+                        <p class="metric-label">SỐ XE SỬ DỤNG</p>
+                        <h3 class="metric-value"><span id="valVehicles">0</span> <small>xe</small></h3>
+                    </div>
+                </div>
+                
+                <div class="metric-card">
+                    <div class="metric-icon-box bg-rose">
+                        <i class="ph-fill ph-users"></i>
+                    </div>
+                    <div class="metric-info">
+                        <p class="metric-label">KHÁCH HÀNG</p>
+                        <h3 class="metric-value"><span id="valCustomers">0</span> <small>điểm</small></h3>
+                    </div>
+                </div>
+            </div>
+
+            <div class="content-body">
+                <!-- Map Section -->
+                <div class="map-section">
+                    <div class="section-header">
+                        <h3><i class="ph-fill ph-map-trifold"></i> Bản đồ mô phỏng</h3>
+                    </div>
+                    <div class="map-wrapper">
+                        <div id="mapPlaceholder" class="empty-state">
+                            <i class="ph-light ph-map-trifold"></i>
+                            <p>Bản đồ sẽ xuất hiện sau khi quá trình tối ưu hoàn tất.</p>
+                        </div>
+                        <iframe id="mapFrame" src="" frameborder="0" style="display: none;"></iframe>
+                    </div>
+                </div>
+
+                <!-- Routes Details Section -->
+                <div class="routes-section" id="routesContainer" style="display: none;">
+                    <div class="section-header flex-between">
+                        <h3><i class="ph-fill ph-list-dashes"></i> Chi tiết lộ trình</h3>
+                        <div class="pagination-controls" id="paginationControls">
+                            <button class="btn-icon" id="prevPageBtn" disabled><i class="ph-bold ph-caret-left"></i></button>
+                            <span class="page-indicator" id="pageIndicator">Trang 1 / 1</span>
+                            <button class="btn-icon" id="nextPageBtn" disabled><i class="ph-bold ph-caret-right"></i></button>
+                        </div>
+                    </div>
+                    <div class="routes-list compact-list" id="routesList">
+                        <!-- Routes will be injected here via JS -->
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <script>
+        // Update simple time badge
+        setInterval(() => {
+            document.getElementById('currentTime').innerText = new Date().toLocaleTimeString('vi-VN');
+        }, 1000);
+    </script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 {
     "paths": {
-        "distance_matrix": "Data/orsm_matrix_500.csv",
-        "locations_data":  "Data/locations.csv",
+        "distance_matrix": "Data/Clean/orsm_matrix_1000.csv",
+        "locations_data":  "Data/Clean/locations.csv",
         "output_dir":      "Results"
     },
     "global_constraints": {
@@ -25,8 +25,10 @@
         "step":              0.9997,
         "scores":            [10, 5, 2, 0],
         "decay":             0.7,
-        "init_strategy":     "clarke_wright",
-        "_init_options":     ["random", "greedy", "clarke_wright"]
+        "init_strategy":     "greedy",
+        "_init_options":     ["random", "greedy", "clarke_wright"],
+        "granular_beta":     1.5,
+        "granular_k":        20
     },
     "constraints": {
         "_comment": "Alias global_constraints — dùng cho CvrpState.objective() backward-compat.",

@@ -1,21 +1,13 @@
-"""
-Algorithms/PyVRP/main.py
-
-Entry point độc lập cho PyVRP.
-Quy trình: Load config → Load data (Pipeline) → Solve → Build result (Pipeline) → Save & Visualize (Pipeline)
-main.py gốc ở project root chỉ cần gọi file này qua subprocess — không cần biết logic bên trong.
-"""
+# File khởi chạy chính cho thuật toán PyVRP (Hybrid Genetic Search) sử dụng AlgorithmRunner chuẩn hóa.
+from __future__ import annotations
 
 import os
 import sys
-import json
-import time
 
-# ── Thiết lập PROJECT_ROOT để import Utils ────────────────────────────────────
-_THIS_FILE   = os.path.realpath(__file__)                          # .../Algorithms/PyVRP/main.py
-_ALGO_DIR    = os.path.dirname(_THIS_FILE)                         # .../Algorithms/PyVRP/
-_ALGOS_DIR   = os.path.dirname(_ALGO_DIR)                          # .../Algorithms/
-PROJECT_ROOT = os.path.dirname(_ALGOS_DIR)                         # project root
+_THIS_FILE   = os.path.realpath(__file__)
+_ALGO_DIR    = os.path.dirname(_THIS_FILE)
+_ALGOS_DIR   = os.path.dirname(_ALGO_DIR)
+PROJECT_ROOT = os.path.dirname(_ALGOS_DIR)
 
 for _p in list(sys.path):
     if os.path.normcase(_p) == os.path.normcase(_ALGO_DIR):
@@ -24,68 +16,65 @@ for _p in list(sys.path):
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-# ── Fix encoding Windows ──────────────────────────────────────────────────────
 if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
-# ── Import Utils (Pipeline) và solver ─────────────────────────────────────────
-from Utils.Pipeline import load_data, build_result, save_result, visualize
-from Algorithms.PyVRP.solver.solver_pyVRP import PyVRPSolver  # absolute từ PROJECT_ROOT
-
-CONFIG_PATH = os.path.join(_ALGO_DIR, 'config.json')
+from Utils.Pipeline import AlgorithmRunner, load_data, build_result, save_result, visualize
+from Algorithms.PyVRP.solver.solver_pyVRP import PyVRPSolver
 
 
-def load_config() -> dict:
-    if not os.path.exists(CONFIG_PATH):
-        raise FileNotFoundError(f"Không tìm thấy config: {CONFIG_PATH}")
-    with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
-        return json.load(f)
+class PyVRPRunner(AlgorithmRunner):
+    """Runner đặc thù cho PyVRP với bước xử lý kết quả dạng đặc thù của thư viện."""
 
+    def build_solver(self, data, config):
+        # Khởi tạo PyVRPSolver từ ma trận khoảng cách và ràng buộc bài toán.
+        return PyVRPSolver(
+            matrix      = data["distance_matrix"],
+            constraints = config["global_constraints"],
+        )
 
-def main():
-    print("=" * 60)
-    print("  PyVRP — Hybrid Genetic Search")
-    print("=" * 60)
+    def run(self):
+        # Override run để xử lý định dạng kết quả đặc thù của thư viện PyVRP.
+        import time
+        config      = self._load_config()
+        data_bundle = load_data(config)
 
-    # 1. Load config + data qua Pipeline
-    config      = load_config()
-    data_bundle = load_data(config)
+        solver_cfg       = config.get("solvers", {}).get("py_vrp", {})
+        no_improve_iters = solver_cfg.get("no_improve_iters", 40000)
+        display_log      = solver_cfg.get("display_log", True)
 
-    # 2. Solve
-    solver_cfg       = config.get("solvers", {}).get("py_vrp", {})
-    no_improve_iters = solver_cfg.get("no_improve_iters", 40000)
-    display_log      = solver_cfg.get("display_log", True)
+        solver = self.build_solver(data_bundle, config)
 
-    solver = PyVRPSolver(
-        matrix      = data_bundle["distance_matrix"],
-        constraints = config["global_constraints"]
-    )
+        t0  = time.time()
+        res = solver.solve(no_improve_iters=no_improve_iters, display=display_log)
+        elapsed = time.time() - t0
 
-    t0  = time.time()
-    res = solver.solve(no_improve_iters=no_improve_iters, display=display_log)
-    elapsed = time.time() - t0
+        routes_dict = {
+            i: [0] + route.visits() + [0]
+            for i, route in enumerate(res.best.routes())
+        }
+        total_units = res.best.distance()
+        result      = build_result(self.name, routes_dict, total_units, elapsed)
 
-    # 3. Chuyển output PyVRP sang format chuẩn Pipeline
-    #    PyVRP trả về distance theo cùng đơn vị với ma trận đầu vào (units nội bộ).
-    #    DataLoader đã scale: 1 unit = 10m → build_result() / KM_SCALE (100) → km đúng.
-    routes_dict = {}
-    for i, route in enumerate(res.best.routes()):
-        routes_dict[i] = [0] + route.visits() + [0]
+        print(f"\n[KẾT QUẢ] Tổng quãng đường : {result['total_distance_km']:.2f} km")
+        print(f"[KẾT QUẢ] Số xe sử dụng    : {result['num_vehicles']}")
+        print(f"[KẾT QUẢ] Thời gian chạy   : {elapsed:.2f}s")
 
-    total_units = res.best.distance()   # units nội bộ, KHÔNG chia thêm
-    result      = build_result("PyVRP", routes_dict, total_units, elapsed)
+        save_result(result, config, self.subfolder)
+        visualize(result, config, self.subfolder, data_bundle["df_locations"])
 
-    print(f"\n[KẾT QUẢ] Tổng quãng đường : {result['total_distance_km']:.2f} km")
-    print(f"[KẾT QUẢ] Số xe sử dụng    : {result['num_vehicles']}")
-    print(f"[KẾT QUẢ] Thời gian chạy   : {elapsed:.2f}s")
-
-    # 4. Lưu kết quả và visualize qua Pipeline
-    save_result(result, config, subfolder="py_vrp")
-    visualize(result, config, subfolder="py_vrp", df_locations=data_bundle["df_locations"])
-
-    print(f"\n[HOÀN TẤT] Kết quả đã lưu tại: Results/py_vrp/")
+        self._print_summary(result, elapsed)
+        return result
 
 
 if __name__ == "__main__":
-    main()
+    print("=" * 60)
+    print("  PyVRP — Hybrid Genetic Search")
+    print("=" * 60)
+    runner = PyVRPRunner(
+        name        = "PyVRP",
+        config_path = os.path.join(_ALGO_DIR, "config.json"),
+        subfolder   = "py_vrp",
+    )
+    runner.run()

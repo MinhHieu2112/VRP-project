@@ -1,101 +1,93 @@
-"""
-Algorithms/Tabu/main_tabu.py
-Entry-point cho Granular Tabu Search solver.
-Cải tiến dựa trên Toth & Vigo (2003) và Gendreau et al. (1994).
-
-CHANGES:
-  [CFG-1] Đọc init_strategy từ config_tabu.json['tabu_parameters']['init_strategy']
-          thay vì hardcode "clarke_wright" trong code.
-  [CFG-2] Log rõ strategy đang dùng.
-"""
+# File khởi chạy chính cho thuật toán Granular Tabu Search sử dụng AlgorithmRunner chuẩn hóa.
+from __future__ import annotations
 
 import os
 import sys
-import json
-import time
+
 import numpy as np
 
-CURRENT_DIR  = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_DIR))
-sys.path.append(PROJECT_ROOT)
+_THIS_DIR    = os.path.dirname(os.path.realpath(__file__))
+PROJECT_ROOT = os.path.normpath(os.path.join(_THIS_DIR, '..', '..'))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
+from Utils.Pipeline import AlgorithmRunner
 from Algorithms.Init_strategies.Init_strategies import init_solution
-from Algorithms.Tabu.tabu_solver import GranularTabuSearch
-from Utils.Pipeline import load_data, build_result, save_result, visualize
+from Algorithms.Tabu.solver import GranularTabuSearch
 
 
-def load_config() -> dict:
-    path = os.path.join(CURRENT_DIR, 'config_tabu.json')
-    with open(path, 'r', encoding='utf-8') as f:
-        return json.load(f)
+class _TabuSolverWrapper:
+    """Wrapper mỏng bọc GranularTabuSearch để thống nhất interface solve() -> (routes, cost)."""
+
+    def __init__(self, data: dict, config: dict) -> None:
+        # Khởi tạo wrapper với dữ liệu bài toán và cấu hình tham số GTS.
+        self._data   = data
+        self._config = config
+
+    def solve(self):
+        # Khởi tạo nghiệm ban đầu và chạy GTS, trả về (routes, cost_units).
+        data   = self._data
+        config = self._config
+
+        matrix      = data['distance_matrix']
+        capacity    = data['vehicle_capacity']
+        demands_arr = data['demands']
+        num_nodes   = matrix.shape[0]
+
+        demands_dict = {i: int(demands_arr[i]) for i in range(num_nodes)}
+        tabu_p = config['tabu_parameters']
+        cons   = config.get('constraints', config.get('global_constraints', {}))
+
+        init_strategy = tabu_p.get('init_strategy', 'clarke_wright')
+        print(f"[Tabu] Khởi tạo nghiệm bằng chiến lược: '{init_strategy}'")
+
+        initial_state = init_solution(
+            strategy     = init_strategy,
+            matrix       = matrix,
+            num_nodes    = num_nodes,
+            capacity     = capacity,
+            demands      = demands_dict,
+            max_vehicles = cons.get('max_vehicles', 200),
+            validate     = True,
+        )
+
+        served  = {n for r in initial_state for n in r if n != 0}
+        missing = set(range(1, num_nodes)) - served
+        if missing:
+            print(f"[WARN] {len(missing)} KH chưa được phục vụ sau init!")
+        else:
+            print(f"[OK] Init: {len(initial_state)} xe, tất cả {num_nodes - 1} KH được phục vụ")
+
+        solver = GranularTabuSearch(
+            distance_matrix = matrix,
+            demands         = demands_dict,
+            capacity        = capacity,
+            max_v           = cons.get('max_vehicles', 200),
+            tabu_size       = tabu_p.get('tabu_size',        20),
+            max_iter        = tabu_p.get('max_iterations', 3000),
+            max_no_improve  = tabu_p.get('max_no_improve',  400),
+            granular_beta   = tabu_p.get('granular_beta',   1.5),
+            granular_k      = tabu_p.get('granular_k',       15),
+            penalty_lambda  = tabu_p.get('penalty_lambda', None),
+            penalty_h       = tabu_p.get('penalty_h',        20),
+        )
+
+        return solver.solve(initial_state)
 
 
-def verify_coverage(initial_state: list, num_nodes: int):
-    served  = {n for r in initial_state for n in r if n != 0}
-    missing = set(range(1, num_nodes)) - served
-    if missing:
-        print(f"[WARN] {len(missing)} KH chưa được phục vụ sau init!")
-    else:
-        print(f"[OK] Init: {len(initial_state)} xe, "
-              f"tất cả {num_nodes - 1} KH được phục vụ")
+class TabuRunner(AlgorithmRunner):
+    """Runner đặc thù cho Granular Tabu Search, cần bước khởi tạo nghiệm ban đầu trước khi giải."""
 
-
-def run_tabu():
-    print("\n===== RUN GRANULAR TABU SEARCH (Toth & Vigo, 2003) =====")
-    config = load_config()
-    data   = load_data(config)
-
-    matrix      = data['distance_matrix']
-    capacity    = data['vehicle_capacity']
-    df_locs     = data['df_locations']
-    demands_arr = data['demands']
-    num_nodes   = matrix.shape[0]
-
-    demands_dict = {i: int(demands_arr[i]) for i in range(num_nodes)}
-    tabu_p = config['tabu_parameters']
-    cons   = config['constraints']
-
-    # [CFG-1] Đọc init_strategy từ config, default = "clarke_wright"
-    init_strategy = tabu_p.get('init_strategy', 'clarke_wright')
-    print(f"[Tabu] Khởi tạo nghiệm bằng chiến lược: '{init_strategy}'")
-
-    initial_state = init_solution(
-        strategy      = init_strategy,
-        matrix        = matrix,
-        num_nodes     = num_nodes,
-        capacity      = capacity,
-        demands       = demands_dict,
-        max_vehicles  = cons['max_vehicles'],
-        validate      = True,
-    )
-    verify_coverage(initial_state, num_nodes)
-
-    solver = GranularTabuSearch(
-        distance_matrix = matrix,
-        demands         = demands_dict,
-        capacity        = capacity,
-        max_v           = cons['max_vehicles'],
-        tabu_size       = tabu_p.get('tabu_size',        20),
-        max_iter        = tabu_p.get('max_iterations', 3000),
-        max_no_improve  = tabu_p.get('max_no_improve',  400),
-        granular_beta   = tabu_p.get('granular_beta',   1.5),
-        granular_k      = tabu_p.get('granular_k',       15),
-        penalty_lambda  = tabu_p.get('penalty_lambda', None),
-        penalty_h       = tabu_p.get('penalty_h',        20),
-    )
-
-    start = time.time()
-    best_state, best_cost_units = solver.solve(initial_state)
-    elapsed = time.time() - start
-
-    result = build_result("Granular Tabu Search", best_state, best_cost_units, elapsed)
-    save_result(result, config, "Tabu")
-    visualize(result, config, "Tabu", df_locs)
-
-    print(f"\n[TABU DONE] {result['total_distance_km']:.2f} km | "
-          f"{result['num_vehicles']} xe | {elapsed:.2f}s")
-    return result
+    def build_solver(self, data, config):
+        # Tạo wrapper bao bọc GTS để chuẩn hóa interface giải thuật.
+        return _TabuSolverWrapper(data, config)
 
 
 if __name__ == "__main__":
-    run_tabu()
+    print("\n===== RUN GRANULAR TABU SEARCH (Toth & Vigo, 2003) =====")
+    runner = TabuRunner(
+        name        = "Granular Tabu Search",
+        config_path = os.path.join(_THIS_DIR, "config_tabu.json"),
+        subfolder   = "Tabu",
+    )
+    runner.run()

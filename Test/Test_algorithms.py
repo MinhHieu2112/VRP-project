@@ -167,9 +167,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-# Sample usage:
-# python Test_algorithms.py \
-#  --result ../Results/SA/result_sa(2).txt \
-#  --matrix ../Data/orsm_matrix.csv

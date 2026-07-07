@@ -1,7 +1,7 @@
 {
     "paths": {
-        "distance_matrix": "Data/orsm_matrix.csv",
-        "locations_data":  "Data/locations.csv",
+        "distance_matrix": "Data/Clean/orsm_matrix_1000.csv",
+        "locations_data":  "Data/Clean/locations.csv",
         "output_dir":      "Results"
     },
     "global_constraints": {
@@ -9,7 +9,8 @@
         "vehicle_capacity":     10,
         "default_demand":       1,
         "penalty_unassigned":   100000,
-        "penalty_vehicle_over": 50000
+        "penalty_vehicle_over": 50000,
+        "vehicle_penalty":      3000
     },
     "visualization": {
         "osrm_url":     "http://localhost:5001",
@@ -18,11 +19,10 @@
         "zoom_start":   13
     },
     "sa_parameters": {
-        "_comment": "SA đọc block này. Đơn vị nội bộ (KM_SCALE=100).",
-        "start_temperature": 1000,
+        "start_temperature": 500,
         "end_temperature":   0.0001,
         "step":              0.9997,
-        "max_no_improve":    30000,
+        "max_no_improve":    20000,
         "iter_per_temp":     1000,
         "init_strategy":     "greedy",
         "_init_options":     ["random", "greedy", "clarke_wright"]
@@ -33,6 +33,7 @@
         "vehicle_capacity":     10,
         "default_demand":       1,
         "penalty_unassigned":   100000,
-        "penalty_vehicle_over": 50000
+        "penalty_vehicle_over": 50000,
+        "vehicle_penalty":      3000
     }
 }

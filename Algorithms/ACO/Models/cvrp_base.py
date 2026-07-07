@@ -1,11 +1,14 @@
-
+# File định nghĩa các lớp mô hình đồ thị CVRP và thực thể Node phục vụ thuật toán ACO.
 import numpy as np
 import copy
 import os
 
 
 class Node:
+    """Đại diện cho một nút trong bài toán VRP (depot hoặc khách hàng)."""
+
     def __init__(self, id: int, x: float, y: float, demand: float):
+        # Khởi tạo thông tin của một node gồm vị trí và nhu cầu vận chuyển.
         self.id       = id
         self.is_depot = (id == 0)
         self.x        = x
@@ -14,11 +17,14 @@ class Node:
 
 
 class CVRPGraph:
+    """Đồ thị bài toán CVRP lưu trữ ma trận khoảng cách và pheromone cho ACO."""
+
     def __init__(self, node_num: int, nodes: list, node_dist_mat: np.ndarray,
                  vehicle_capacity: int, rho: float = 0.1, xi: float = 0.01):
+        # Khởi tạo đồ thị, ma trận khoảng cách, ma trận pheromone và thông tin heuristic.
         self.node_num         = node_num
         self.nodes            = nodes
-        self.node_dist_mat    = node_dist_mat.astype(np.float32)  # [PERF-4]
+        self.node_dist_mat    = node_dist_mat.astype(np.float32)
         self.vehicle_capacity = vehicle_capacity
         self.rho              = rho
         self.xi               = xi
@@ -30,7 +36,6 @@ class CVRPGraph:
             nnh_distance = 1.0
         self.init_pheromone_val = 1.0 / (nnh_distance * self.node_num)
 
-        # [PERF-4] float32 pheromone matrix
         self.pheromone_mat = np.full(
             (self.node_num, self.node_num),
             self.init_pheromone_val,
@@ -42,14 +47,11 @@ class CVRPGraph:
                 self.node_dist_mat > 0,
                 1.0 / self.node_dist_mat,
                 0.0
-            ).astype(np.float32)  # [PERF-4]
+            ).astype(np.float32)
         np.fill_diagonal(self.heuristic_info_mat, 0.0)
 
-    # ──────────────────────────────────────────────────────────────────
-    # Validation
-    # ──────────────────────────────────────────────────────────────────
-
     def _validate_inputs(self):
+        # Kiểm tra tính hợp lệ của dữ liệu đầu vào trước khi chạy thuật toán.
         errors   = []
         warnings = []
         mat      = self.node_dist_mat
@@ -99,11 +101,8 @@ class CVRPGraph:
         print(f"[OK] Validation passed: {self.node_num} nodes, "
               f"capacity={self.vehicle_capacity}, ACVRP (asymmetric)")
 
-    # ──────────────────────────────────────────────────────────────────
-    # Seed pheromone
-    # ──────────────────────────────────────────────────────────────────
-
     def seed_pheromone(self, solution: list, seed_weight: float = 2.0):
+        # Khởi tạo pheromone ban đầu dựa trên nghiệm mốc nhằm định hướng kiến.
         boost = np.float32(self.init_pheromone_val * seed_weight)
         for route in solution:
             for i in range(len(route) - 1):
@@ -111,47 +110,19 @@ class CVRPGraph:
                 if self.pheromone_mat[u][v] < boost:
                     self.pheromone_mat[u][v] = boost
 
-    # ──────────────────────────────────────────────────────────────────
-    # Pheromone Updates
-    # ──────────────────────────────────────────────────────────────────
-
     def local_update_pheromone(self, start_ind: int, end_ind: int):
-        """Local update ACS — 1 chiều i→j. Giữ nguyên cho backward compat."""
+        # Cập nhật pheromone cục bộ trên cạnh mà kiến vừa đi qua.
         self.pheromone_mat[start_ind][end_ind] = (
             (1.0 - self.xi) * self.pheromone_mat[start_ind][end_ind]
             + self.xi * self.init_pheromone_val
         )
 
     def global_update_pheromone(self, best_path: list, best_path_distance: float):
-        """
-        Global update CŨNG (backward compat).
-        Gọi global_update_pheromone_sparse thay thế để tăng hiệu năng.
-        """
+        # Cập nhật pheromone toàn cục theo đường đi tốt nhất của vòng lặp.
         self.global_update_pheromone_sparse(best_path, best_path_distance)
 
     def global_update_pheromone_sparse(self, best_path: list, best_path_distance: float):
-        """
-        [PERF-1] Sparse global update — chỉ cập nhật cạnh trên best_path.
-
-        PHÂN TÍCH VẤN ĐỀ CŨ:
-          pheromone_mat *= (1 - rho)   ← nhân TOÀN BỘ n×n matrix mỗi iter
-          Với n=1000: 1M phép nhân float32 ≈ ~2-5ms/iter
-          × 1000 iter × 40 ants = tích lũy đáng kể
-
-        GIẢI PHÁP:
-          Thay vì evaporate toàn bộ matrix, chỉ:
-          1. Evaporate các cạnh trên best_path: τ(i→j) *= (1-ρ)
-          2. Reinforce best_path:               τ(i→j) += ρ/L*
-          → Từ O(n²) xuống O(path_length) ≈ O(n) cho mỗi global update
-
-        LƯU Ý VỀ TÍNH ĐÚNG ĐẮN:
-          Cách tiếp cận này là "elitist update" — chỉ những cạnh tốt mới
-          bị evaporate và reinforce. Các cạnh không trên best_path giữ nguyên
-          giá trị pheromone và dần "bị pha loãng tương đối" so với best_path.
-          Đây là biến thể phổ biến trong ACS thực tế (Dorigo & Gambardella 1997,
-          mục 3.2) — cho kết quả tốt tương đương full evaporation với chi phí
-          tính toán thấp hơn nhiều.
-        """
+        # Cập nhật pheromone thưa thớt chỉ trên các cạnh của best path.
         if best_path_distance <= 0:
             return
 
@@ -161,38 +132,43 @@ class CVRPGraph:
 
         current_ind = best_path[0]
         for next_ind in best_path[1:]:
-            # Evaporate + reinforce chỉ cạnh này
             pm[current_ind][next_ind] = (
                 one_minus_rho * pm[current_ind][next_ind] + delta
             )
             current_ind = next_ind
 
-    # ──────────────────────────────────────────────────────────────────
-    # Nearest Neighbor Heuristic
-    # ──────────────────────────────────────────────────────────────────
-
     def nearest_neighbor_heuristic(self):
-        index_to_visit  = list(range(1, self.node_num))
+        # Xây dựng nghiệm ban đầu theo heuristic láng giềng gần nhất, sử dụng NumPy masked argmin để đạt O(N) mỗi bước.
+        n               = self.node_num
+        demands         = np.array([self.nodes[i].demand for i in range(n)], dtype=np.float32)
+        visited         = np.zeros(n, dtype=bool)
+        visited[0]      = True
         current_index   = 0
-        current_load    = 0
+        current_load    = 0.0
         travel_distance = 0.0
         travel_path     = [0]
+        remaining       = n - 1  # số khách hàng chưa thăm
 
-        while index_to_visit:
-            nearest = self._cal_nearest_next_index(
-                index_to_visit, current_index, current_load)
+        while remaining > 0:
+            row = self.node_dist_mat[current_index].copy()
+            # Che các node đã thăm và node vi phạm tải trọng
+            feasible_mask = (~visited) & ((current_load + demands) <= self.vehicle_capacity)
 
-            if nearest is None:
+            if not np.any(feasible_mask):
+                # Quay về depot khi không còn node khả thi
                 travel_distance += self.node_dist_mat[current_index][0]
                 travel_path.append(0)
                 current_index = 0
-                current_load  = 0
+                current_load  = 0.0
             else:
-                current_load    += self.nodes[nearest].demand
+                row[~feasible_mask] = np.inf
+                nearest = int(np.argmin(row))
+                current_load    += demands[nearest]
                 travel_distance += self.node_dist_mat[current_index][nearest]
                 travel_path.append(nearest)
-                current_index = nearest
-                index_to_visit.remove(nearest)
+                visited[nearest] = True
+                current_index    = nearest
+                remaining       -= 1
 
         travel_distance += self.node_dist_mat[current_index][0]
         travel_path.append(0)
@@ -201,6 +177,7 @@ class CVRPGraph:
         return travel_path, float(travel_distance), vehicle_num
 
     def _cal_nearest_next_index(self, index_to_visit, current_index, current_load):
+        # Tìm node gần nhất còn lại thỏa mãn ràng buộc tải trọng từ vị trí hiện tại.
         nearest_ind      = None
         nearest_distance = float('inf')
 
@@ -216,11 +193,15 @@ class CVRPGraph:
 
     @staticmethod
     def calculate_dist(node_a: Node, node_b: Node) -> float:
+        # Tính khoảng cách Euclidean giữa hai node.
         return np.linalg.norm((node_a.x - node_b.x, node_a.y - node_b.y))
 
 
 class PathMessage:
+    """Cấu trúc thông điệp chứa thông tin đường đi tốt nhất."""
+
     def __init__(self, path, distance):
+        # Lưu trữ thông tin về đường đi và số lượng xe sử dụng.
         if path is not None:
             self.path             = copy.deepcopy(path)
             self.distance         = copy.deepcopy(distance)
@@ -231,4 +212,5 @@ class PathMessage:
             self.used_vehicle_num = None
 
     def get_path_info(self):
+        # Trả về bộ thông tin gồm đường đi, khoảng cách và số xe sử dụng.
         return self.path, self.distance, self.used_vehicle_num

@@ -1,15 +1,15 @@
-
+# Lớp điều phối chính thực thi giải thuật tối ưu hóa Ant Colony Optimization (ACO).
 import numpy as np
 import random
 import time
+import math
 from Models.cvrp_base import CVRPGraph
 from Core.ant import Ant
 
-KM_SCALE = 100  # 1 unit = 10m, 1 km = 100 units
+KM_SCALE = 100 
 
 # Số láng giềng tối đa trong candidate list
 CANDIDATE_K = 20
-
 
 class BasicACO:
     def __init__(self,
@@ -20,6 +20,7 @@ class BasicACO:
                  beta: float           = 2.0,
                  q0: float             = 0.9,
                  no_improve_limit: int = 500):
+        # Khởi tạo các thông số, cấu trúc pheromone và danh sách kiến cố định.
         self.graph            = graph
         self.ants_num         = ants_num
         self.max_iter         = max_iter
@@ -35,11 +36,15 @@ class BasicACO:
         # Cache demands array để vectorized check
         self._demands = np.array(
             [graph.nodes[i].demand for i in range(graph.node_num)],
-            dtype=np.float32  # [PERF-4] float32 đủ cho demand values
+            dtype=np.float32
         )
 
         # [PERF-2] Precompute candidate lists (top-K láng giềng gần nhất cho mỗi node)
         self._candidate_lists = self._build_candidate_lists(k=CANDIDATE_K)
+        
+        # Khởi tạo mảng các kiến cố định phục vụ Object Pooling
+        self.ants = [Ant(self.graph) for _ in range(self.ants_num)]
+        
         print(f"[ACO] Candidate lists built: top-{CANDIDATE_K} per node, "
               f"n={graph.node_num}, ants={ants_num}")
 
@@ -48,14 +53,7 @@ class BasicACO:
     # ──────────────────────────────────────────────────────────────────
 
     def _build_candidate_lists(self, k: int) -> np.ndarray:
-        """
-        Lưu dưới dạng numpy array (node_num, k) dtype=int32.
-
-        Với n=1000, k=20:
-          - Mỗi node chỉ xét 20 neighbor thay vì ~500 feasible nodes
-          - Thời gian precompute: O(n² log k) một lần duy nhất
-          - Thời gian mỗi bước chọn: O(k) thay vì O(n)
-        """
+        # Xây dựng danh sách candidate list chứa k láng giềng gần nhất cho mỗi node.
         n = self.graph.node_num
         dist_mat = self.graph.node_dist_mat  # (n, n)
         candidate_lists = np.zeros((n, k), dtype=np.int32)
@@ -64,7 +62,6 @@ class BasicACO:
             row = dist_mat[i].copy()
             row[i] = np.inf  # loại bỏ self
             row[0] = np.inf  # loại bỏ depot (depot được xử lý riêng)
-            # Lấy k node gần nhất
             nearest = np.argpartition(row, min(k, n - 2))[:min(k, n - 2)]
             nearest = nearest[np.argsort(row[nearest])]
             candidate_lists[i, :len(nearest)] = nearest
@@ -78,7 +75,7 @@ class BasicACO:
     # ──────────────────────────────────────────────────────────────────
 
     def run_basic_aco(self):
-        """Chạy ACS, trả về (best_path, best_distance, best_vehicle_num)."""
+        # Chạy giải thuật ACO để tìm kiếm lộ trình tối ưu và trả về kết quả.
         self._basic_aco()
         self.best_vehicle_num = self._count_valid_vehicles(self.best_path)
         return self.best_path, self.best_path_distance, self.best_vehicle_num
@@ -88,6 +85,7 @@ class BasicACO:
     # ──────────────────────────────────────────────────────────────────
 
     def _basic_aco(self):
+        # Vòng lặp tối ưu chính của giải thuật ACO.
         start_time       = time.time()
         no_improve_count = 0
         q0_current       = self.q0
@@ -108,12 +106,13 @@ class BasicACO:
             elif no_improve_count == 0 and q0_current != self.q0:
                 q0_current = self.q0
 
-            ants = [Ant(self.graph) for _ in range(self.ants_num)]
-            for ant in ants:
+            # Sử dụng Object Pooling: Reset trạng thái của các con kiến thay vì tạo mới
+            for ant in self.ants:
+                ant.reset()
                 self._construct_solution(ant, q0_current)
 
             improved = False
-            for ant in ants:
+            for ant in self.ants:
                 if (self.best_path is None
                         or ant.total_travel_distance < self.best_path_distance):
                     self.best_path          = ant.travel_path[:]
@@ -127,7 +126,6 @@ class BasicACO:
 
             no_improve_count = 0 if improved else no_improve_count + 1
 
-            # [PERF-1] Global update chỉ trên best_path
             self.graph.global_update_pheromone_sparse(
                 self.best_path, self.best_path_distance)
 
@@ -146,13 +144,12 @@ class BasicACO:
     # ──────────────────────────────────────────────────────────────────
     # Xây nghiệm cho một kiến
     # ──────────────────────────────────────────────────────────────────
-
     def _construct_solution(self, ant: Ant, q0: float):
+        # Xây dựng lộ trình hoàn chỉnh cho một kiến dựa trên tri thức heuristic và pheromone.
         n_customers        = self.graph.node_num - 1
         max_customer_steps = n_customers
         customer_steps     = 0
 
-        # [PERF-5] Batch local update: tích lũy (from, to) thay vì update ngay
         local_update_batch = []
 
         while not ant.index_to_visit_empty():
@@ -164,7 +161,6 @@ class BasicACO:
                 ant.force_visit_remaining(remaining)
                 break
 
-            # [PERF-2] Vectorized feasibility trên candidate list trước
             feasible = self._get_feasible_candidates(ant)
 
             if not feasible:
@@ -189,22 +185,25 @@ class BasicACO:
             ant.move_to_next_index(0)
             local_update_batch.append((prev, 0))
 
-        # [PERF-5] Apply batch local update một lần sau khi kiến hoàn thành
         self._apply_local_update_batch(local_update_batch)
 
-    def _get_feasible_candidates(self, ant: Ant) -> list:
-        """
-        [PERF-2] Ưu tiên candidate list trước, fallback về toàn bộ nếu cần.
+    def _fallback_feasible(self, ant: Ant) -> list:
+        # Quét tìm kiếm các node khả thi tiếp theo trên toàn bộ đồ thị sử dụng list boolean.
+        load = ant.vehicle_load
+        capacity = self.graph.vehicle_capacity
+        demands = self._demands
+        visited = ant.visited
 
-        Luồng:
-          1. Lấy top-K neighbors của node hiện tại
-          2. Lọc: chỉ giữ node chưa thăm VÀ thỏa capacity
-          3. Nếu có → trả về danh sách này (thường đủ)
-          4. Nếu rỗng → fallback: vectorized check toàn bộ to_visit
-             (tránh bỏ sót node hợp lệ nằm ngoài top-K)
-        """
+        feasible = []
+        for idx in range(1, len(visited)):
+            if not visited[idx] and (load + demands[idx]) <= capacity:
+                feasible.append(idx)
+        return feasible
+
+    def _get_feasible_candidates(self, ant: Ant) -> list:
+        # Lấy danh sách các node khả thi xung quanh kiến, ưu tiên duyệt trên candidate list.
         current = ant.current_index
-        to_visit_set = ant._index_to_visit_set
+        visited = ant.visited
         load = ant.vehicle_load
         capacity = self.graph.vehicle_capacity
         demands = self._demands
@@ -215,26 +214,18 @@ class BasicACO:
         for nb in candidates:
             if nb == -1:
                 break  # padding
-            if nb in to_visit_set and (load + demands[nb]) <= capacity:
-                feasible_from_candidates.append(int(nb))
+            node = int(nb)
+            if not visited[node] and (load + demands[node]) <= capacity:
+                feasible_from_candidates.append(node)
 
         if feasible_from_candidates:
             return feasible_from_candidates
 
-        # Bước 2: Fallback — vectorized check toàn bộ to_visit
-        # (chỉ khi candidate list không có node hợp lệ)
-        to_visit_arr = np.array(list(to_visit_set), dtype=np.int32)
-        if len(to_visit_arr) == 0:
-            return []
-        node_demands  = demands[to_visit_arr]
-        feasible_mask = (load + node_demands) <= capacity
-        return to_visit_arr[feasible_mask].tolist()
+        # Bước 2: Fallback khi candidate list không chứa ứng viên hợp lệ
+        return self._fallback_feasible(ant)
 
     def _apply_local_update_batch(self, batch: list):
-        """
-        [PERF-5] Apply tất cả local updates sau khi kiến hoàn thành.
-        Gộp vào một loop thay vì gọi hàm N lần qua Python overhead.
-        """
+        # Cập nhật pheromone cục bộ cho các cạnh mà kiến đã đi qua trong lượt đi.
         xi  = self.graph.xi
         tau0 = self.graph.init_pheromone_val
         pm   = self.graph.pheromone_mat
@@ -244,35 +235,59 @@ class BasicACO:
     # ──────────────────────────────────────────────────────────────────
     # Chọn node tiếp theo — ACS transition rule
     # ──────────────────────────────────────────────────────────────────
-
     def select_next_index(self, ant: Ant, feasible_nodes: list, q0: float) -> int:
+        # Chọn node tiếp theo dựa trên quy tắc chuyển trạng thái của kiến (ACS transition rule) bằng Python thuần để tránh Numpy overhead.
         current_index = ant.current_index
-        feasible_arr  = np.array(feasible_nodes, dtype=np.int32)
+        pheromone_row = self.graph.pheromone_mat[current_index]
+        heuristic_row = self.graph.heuristic_info_mat[current_index]
 
-        pheromone = self.graph.pheromone_mat[current_index][feasible_arr]
-        heuristic = self.graph.heuristic_info_mat[current_index][feasible_arr]
+        alpha = self.alpha
+        beta = self.beta
 
-        scores = (pheromone if self.alpha == 1.0
-                  else np.power(pheromone, self.alpha))
-        scores = scores * np.power(heuristic, self.beta)
-        scores = np.nan_to_num(scores, nan=0.0, posinf=0.0, neginf=0.0)
+        n_feasible = len(feasible_nodes)
+        scores = [0.0] * n_feasible
+        score_sum = 0.0
 
-        score_sum = scores.sum()
+        for idx, node in enumerate(feasible_nodes):
+            p = pheromone_row[node]
+            h = heuristic_row[node]
+
+            score_p = p if alpha == 1.0 else (p ** alpha)
+            score_h = (h * h) if beta == 2.0 else (h ** beta)
+            score = score_p * score_h
+
+            if not math.isfinite(score) or score < 0:
+                score = 0.0
+
+            scores[idx] = score
+            score_sum += score
+
         if score_sum <= 0:
             return random.choice(feasible_nodes)
 
         if random.random() < q0:
-            return int(feasible_arr[int(np.argmax(scores))])
+            best_idx = 0
+            best_score = scores[0]
+            for idx in range(1, n_feasible):
+                if scores[idx] > best_score:
+                    best_score = scores[idx]
+                    best_idx = idx
+            return feasible_nodes[best_idx]
         else:
-            probs = scores / score_sum
-            return self._roulette_wheel(feasible_nodes, probs)
+            r = random.random() * score_sum
+            accumulator = 0.0
+            for idx, score in enumerate(scores):
+                accumulator += score
+                if accumulator >= r:
+                    return feasible_nodes[idx]
+            return feasible_nodes[-1]
 
     # ──────────────────────────────────────────────────────────────────
     # Helpers
     # ──────────────────────────────────────────────────────────────────
-
     @staticmethod
     def _roulette_wheel(candidates: list, probs: np.ndarray) -> int:
+        # Chọn một phần tử ngẫu nhiên dựa trên mảng phân phối xác suất tích lũy.
         probs = np.clip(probs, 0, None)
         total = probs.sum()
         if total <= 0:
@@ -282,7 +297,7 @@ class BasicACO:
 
     @staticmethod
     def _count_valid_vehicles(path: list) -> int:
-        """Đếm đúng số xe kể cả path không kết thúc bằng depot."""
+        # Đếm số lượng xe thực tế đang hoạt động trong lộ trình thu được.
         count, has_customer = 0, False
         for node in path[1:]:
             if node == 0:

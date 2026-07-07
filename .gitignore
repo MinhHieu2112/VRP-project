@@ -1,0 +1,8 @@
+# Local OSRM source and generated routing data (several GB).
+osrm-data/
+
+__pycache__/
+*.pyc
+Results/
+venv/
+.env

@@ -3,17 +3,13 @@ import sys
 import subprocess
 import traceback
 
-# ── Fix encoding Windows ──────────────────────────────────────────────────────
 if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
-# =====================================================================
 #  DANH SÁCH THUẬT TOÁN
-#  Mỗi entry: tên hiển thị + đường dẫn script entry point
-# =====================================================================
 ALGORITHMS = {
     1: {
         "name":   "PyVRP (Hybrid Genetic Search)",
@@ -54,10 +50,7 @@ ALGORITHMS = {
 
 SKIP_ALL = {7}   # thuật toán bỏ qua khi chạy "tất cả"
 
-
-# =====================================================================
 #  DISPATCH
-# =====================================================================
 def run(algo: dict) -> None:
     """Chạy một thuật toán bằng subprocess, output stream trực tiếp ra terminal."""
     script = algo["script"]
@@ -78,9 +71,8 @@ def run(algo: dict) -> None:
         print(f"\n[LỖI] {algo['name']} kết thúc với mã lỗi: {result.returncode}")
 
 
-# =====================================================================
+
 #  MENU
-# =====================================================================
 def show_menu() -> None:
     print("\n" + "=" * 60)
     print("  ACVRP HCMC — HỆ THỐNG TỐI ƯU HÓA ĐỊNH TUYẾN XE")
